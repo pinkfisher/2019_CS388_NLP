@@ -126,9 +126,10 @@ class PersonClassifier(object):
         :return: 0 if not a person token, 1 if a person token
         """
     def predict(self, tokens, pos_tags, idx):
-        feature = get_feature(tokens, pos_tags, idx,
-                              self.indexer, self.pos_indexer, self.prefix_indexer, self.suffix_indexer)
-        if sigmoid(np.dot(self.weights, feature)) > 0.5:
+        #feature = get_feature(tokens, pos_tags, idx,
+        #                      self.indexer, self.pos_indexer, self.prefix_indexer, self.suffix_indexer)
+        feature = get_sparse_feature(tokens, pos_tags, idx, self.indexer)
+        if sigmoid(score_indexed_features(feature, self.weights)) > 0.5:
             return 1
         else:
             return 0
@@ -142,9 +143,12 @@ class PersonClassifier(object):
 
         # initialize weights
         if self.weights is None:
-            feature = get_feature(ner_exs[0].tokens, ner_exs[0].pos, 0,
-                                  self.indexer, self.pos_indexer, self.prefix_indexer, self.suffix_indexer)
-            self.weights = np.random.randn(len(feature))/10
+            #feature = get_feature(ner_exs[0].tokens, ner_exs[0].pos, 0,
+            #                      self.indexer, self.pos_indexer, self.prefix_indexer, self.suffix_indexer)
+            #feature = get_sparse_feature(ner_exs[0].tokens, 0, self.indexer)
+            #self.weights = np.random.randn(len(feature))/10
+            #self.weights = np.random.randn(10)/10
+            self.weights = np.zeros(10)
 
         self.optimizer = L1RegularizedAdagradTrainer(self.weights)
 
@@ -157,8 +161,9 @@ class PersonClassifier(object):
                     label = ex.labels[idx]
 
                     # generate feature for this token
-                    feature = get_feature(ex.tokens, ex.pos, idx,
-                                          self.indexer, self.pos_indexer, self.prefix_indexer, self.suffix_indexer)
+                    #feature = get_feature(ex.tokens, ex.pos, idx,
+                    #                      self.indexer, self.pos_indexer, self.prefix_indexer, self.suffix_indexer)
+                    feature = get_sparse_feature(ex.tokens, ex.pos, idx, self.indexer)
 
                     features.append((feature, label))
             self.features = features
@@ -166,19 +171,57 @@ class PersonClassifier(object):
         features = self.features
 
         # begin training
-        for epoch in range(1):
+        for epoch in range(3):
             for k, (feature, label) in enumerate(features):
-                if k % 2000 == 0:
-                    print("Update feature " + str(k))
-                    print("Finished " + str(k / len(features)) + "%")
+                #if k % 10000 == 0:
+                ##    print("Update feature " + str(k))
+                #    print("Finished " + str(k / len(features)) + "%")
                 # calculate gradient update
-                gradient = np.dot(feature, label - sigmoid(np.dot(self.weights, feature)))
-                gradients = array_to_counter(gradient)
+                #gradient = np.dot(feature, label - sigmoid(np.dot(self.weights, feature)))
+                #gradient = np.dot(feature, label - sigmoid(score_indexed_features(feature, self.weights)))
+                #gradients = array_to_counter(gradient)
+                gradients = calculate_sparse_gradient(feature, label, self.weights)
+                #if len(gradients.keys()) > 0:
+                #    print(gradients)
                 self.optimizer.apply_gradient_update(gradients, 1)
                 self.weights = self.optimizer.get_final_weights()
 
-        print(self.weights)
+        #print(self.weights)
+        if not self.weights is None:
+            print("-"*15)
+            for w in self.weights:
+                print(str(w))
+            print("-" * 15)
 
+
+def get_sparse_feature(tokens: List[str], pos_tags: List[str], idx: int, indexer: Indexer):
+    token = tokens[idx]
+
+    feature = []
+
+    if indexer.contains(token):
+        feature.append(0)
+
+    if idx > 0 and indexer.contains(tokens[idx-1]):
+        feature.append(1)
+
+    if idx <= len(tokens)-2 and indexer.contains(tokens[idx + 1]):
+        feature.append(2)
+
+    if pos_tags[idx] == "NNP":
+        feature.append(3)
+
+    if pos_tags[idx][0] == "N":
+        feature.append(4)
+
+    return feature
+
+def calculate_sparse_gradient(feature, label, weights):
+    gradient = Counter()
+    score = score_indexed_features(feature, weights)
+    for feat in feature:
+        gradient[feat] = label - score
+    return gradient
 
 def get_feature(tokens: List[str], pos_tags: List[str],
                 idx: int, indexer: Indexer, pos_indexer: Indexer,
@@ -257,7 +300,7 @@ def get_feature(tokens: List[str], pos_tags: List[str],
     #print(len(feature))
     return feature
 
-def get_sparse_feature(token, indexer):
+def get_sparse_feature_pos(token, indexer):
     feature = np.zeros(len(indexer))
     np.put(feature, indexer.index_of(token), 1)
     return feature
@@ -326,7 +369,7 @@ def train_classifier(ner_exs: List[PersonExample]):
         for w in weights:
             print(str(w))
     classifier = PersonClassifier(weights, per_indexer, pos_indexer, prefix_indexer, suffix_indexer)
-    for epoch in range(30):
+    for epoch in range(1):
         print("Start epoch " + str(epoch))
         classifier.weights = weights
         classifier.features = features
