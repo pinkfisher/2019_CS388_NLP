@@ -1,7 +1,6 @@
 # classifier_main.py
 
 import argparse
-import sys
 import time
 from nerdata import *
 from utils import *
@@ -9,6 +8,10 @@ from collections import Counter
 from optimizers import *
 from typing import List
 import numpy as np
+import re
+from random import seed, shuffle
+
+seed(0)
 
 def _parse_args():
     """
@@ -107,13 +110,10 @@ class PersonClassifier(object):
     Constructor arguments are merely suggestions; you're free to change these.
     """
 
-    def __init__(self, weights: np.ndarray, indexer: Indexer, pos_indexer: Indexer,
-                 prefix_indexer: Indexer, suffix_indexer: Indexer):
+    def __init__(self, weights: np.ndarray, indexer: Indexer):
         self.weights = weights
         self.indexer = indexer
-        self.pos_indexer = pos_indexer
-        self.prefix_indexer = prefix_indexer
-        self.suffix_indexer = suffix_indexer
+        self.feature_indexer = Indexer()
         self.optimizer = None
         self.features = None
 
@@ -126,31 +126,14 @@ class PersonClassifier(object):
         :return: 0 if not a person token, 1 if a person token
         """
     def predict(self, tokens, pos_tags, idx):
-        #feature = get_feature(tokens, pos_tags, idx,
-        #                      self.indexer, self.pos_indexer, self.prefix_indexer, self.suffix_indexer)
-        feature = get_sparse_feature(tokens, pos_tags, idx, self.indexer)
+        feature, _ = get_sparse_feature(tokens, pos_tags, idx, self.indexer, self.feature_indexer, add_to_indexer=False)
         if sigmoid(score_indexed_features(feature, self.weights)) > 0.5:
             return 1
         else:
             return 0
 
     def train(self, ner_exs: List[PersonExample]):
-        # gradient = xj (yj - logistic(w * xj))
-
-        # def apply_gradient_update(self, gradient: Counter, batch_size: int):
-        #   for i in gradient.keys():
-        #       self.weights[i] = self.weights[i] + self.alpha * gradient[i]
-
-        # initialize weights
-        if self.weights is None:
-            #feature = get_feature(ner_exs[0].tokens, ner_exs[0].pos, 0,
-            #                      self.indexer, self.pos_indexer, self.prefix_indexer, self.suffix_indexer)
-            #feature = get_sparse_feature(ner_exs[0].tokens, 0, self.indexer)
-            #self.weights = np.random.randn(len(feature))/10
-            #self.weights = np.random.randn(10)/10
-            self.weights = np.zeros(10)
-
-        self.optimizer = L1RegularizedAdagradTrainer(self.weights)
+        #shuffle(ner_exs)
 
         # get features
         if self.features is None:
@@ -161,167 +144,144 @@ class PersonClassifier(object):
                     label = ex.labels[idx]
 
                     # generate feature for this token
-                    #feature = get_feature(ex.tokens, ex.pos, idx,
-                    #                      self.indexer, self.pos_indexer, self.prefix_indexer, self.suffix_indexer)
-                    feature = get_sparse_feature(ex.tokens, ex.pos, idx, self.indexer)
-
+                    feature, feature_indexer = get_sparse_feature(ex.tokens, ex.pos, idx, self.indexer, self.feature_indexer)
+                    self.feature_indexer = feature_indexer
                     features.append((feature, label))
             self.features = features
 
         features = self.features
 
+        # initialize weights
+        if self.weights is None:
+            self.weights = np.random.randn(len(self.feature_indexer)+1)/10
+            #self.weights = np.zeros(len(self.feature_indexer)+1)
+
+        self.optimizer = SGDOptimizer(self.weights, 1)
+        #self.optimizer = L1RegularizedAdagradTrainer(self.weights, lamb=1e-8, eta=4.0)
+        #self.optimizer = UnregularizedAdagradTrainer(self.weights, eta=1.0)
+
         # begin training
-        for epoch in range(3):
+        for epoch in range(1):
             for k, (feature, label) in enumerate(features):
-                #if k % 10000 == 0:
-                ##    print("Update feature " + str(k))
-                #    print("Finished " + str(k / len(features)) + "%")
-                # calculate gradient update
-                #gradient = np.dot(feature, label - sigmoid(np.dot(self.weights, feature)))
-                #gradient = np.dot(feature, label - sigmoid(score_indexed_features(feature, self.weights)))
-                #gradients = array_to_counter(gradient)
+
                 gradients = calculate_sparse_gradient(feature, label, self.weights)
-                #if len(gradients.keys()) > 0:
-                #    print(gradients)
+
                 self.optimizer.apply_gradient_update(gradients, 1)
                 self.weights = self.optimizer.get_final_weights()
 
         #print(self.weights)
-        if not self.weights is None:
-            print("-"*15)
-            for w in self.weights:
-                print(str(w))
-            print("-" * 15)
 
 
-def get_sparse_feature(tokens: List[str], pos_tags: List[str], idx: int, indexer: Indexer):
+def get_sparse_feature(tokens: List[str], pos_tags: List[str], idx: int, indexer: Indexer,
+                       feature_indexer: Indexer, add_to_indexer=True):
     token = tokens[idx]
 
     feature = []
 
+    maybe_add_feature(feature, feature_indexer, add_to_indexer, "bias")
+
+    maybe_add_feature(feature, feature_indexer, add_to_indexer, token.lower())
+    #maybe_add_feature(feature, feature_indexer, add_to_indexer, token) (no)
+
     if indexer.contains(token):
-        feature.append(0)
+        maybe_add_feature(feature, feature_indexer, add_to_indexer, "is_per")
 
-    if idx > 0 and indexer.contains(tokens[idx-1]):
-        feature.append(1)
+    maybe_add_feature(feature, feature_indexer, add_to_indexer, "pos_tag_is_"+pos_tags[idx])
 
-    if idx <= len(tokens)-2 and indexer.contains(tokens[idx + 1]):
-        feature.append(2)
+    if len(pos_tags[idx]) > 2:
+        maybe_add_feature(feature, feature_indexer, add_to_indexer, "pos_tag_prefix_is_" + pos_tags[idx][:2])
 
-    if pos_tags[idx] == "NNP":
-        feature.append(3)
+    #if len(token) > 3:
+    #    maybe_add_feature(feature, feature_indexer, add_to_indexer, "prefix_is_"+token[:3]) (no)
+        #maybe_add_feature(feature, feature_indexer, add_to_indexer, "suffix_is_"+token[-3:]) (no)
 
-    if pos_tags[idx][0] == "N":
-        feature.append(4)
+    if token[0].isupper():
+        maybe_add_feature(feature, feature_indexer, add_to_indexer, "is_upper")
 
-    return feature
+    #if token.isnumeric():
+     #   maybe_add_feature(feature, feature_indexer, add_to_indexer, "is_digit")  # no effect
+
+    maybe_add_feature(feature, feature_indexer, add_to_indexer, "index_"+str(idx))  # maybe
+
+    #maybe_add_feature(feature, feature_indexer, add_to_indexer, "len_of_token_" + str(len(token)))  (no)
+
+    #maybe_add_feature(feature, feature_indexer, add_to_indexer, "shape_is_" + get_shape(token)) (no)
+
+
+    # for previous token
+    if idx > 0:
+        token = tokens[idx - 1]
+        pos_tag = pos_tags[idx - 1]
+
+        maybe_add_feature(feature, feature_indexer, add_to_indexer, "prev_"+token)
+
+        if indexer.contains(token):
+            maybe_add_feature(feature, feature_indexer, add_to_indexer, "prev_is_per")
+
+        #maybe_add_feature(feature, feature_indexer, add_to_indexer, "prev_pos_tag_is_" + pos_tag) (no)
+        maybe_add_feature(feature, feature_indexer, add_to_indexer, "prev_pos_tag_prefix_is_" + pos_tag[:2])
+
+        if token[0].isupper():
+            maybe_add_feature(feature, feature_indexer, add_to_indexer, "prev_is_upper")  # maybe
+
+        maybe_add_feature(feature, feature_indexer, add_to_indexer, "prev_len_of_token_" + str(len(token)))  # maybe
+
+        if token.isnumeric():
+            maybe_add_feature(feature, feature_indexer, add_to_indexer, "prev_is_digit")  # maybe
+
+    #else:
+     #   maybe_add_feature(feature, feature_indexer, add_to_indexer, "bos")  # no
+
+
+    # for next token
+    if idx < len(tokens) - 1:
+        token = tokens[idx + 1]
+        pos_tag = pos_tags[idx + 1]
+
+        #maybe_add_feature(feature, feature_indexer, add_to_indexer, "next_"+token)  # no
+    
+
+        if indexer.contains(token):
+            maybe_add_feature(feature, feature_indexer, add_to_indexer, "next_is_per")
+
+        maybe_add_feature(feature, feature_indexer, add_to_indexer, "next_pos_tag_is_" + pos_tag)
+        maybe_add_feature(feature, feature_indexer, add_to_indexer, "next_pos_tag_prefix_is_" + pos_tag[:2])  # maybe
+
+        if token[0].isupper():
+            maybe_add_feature(feature, feature_indexer, add_to_indexer, "next_is_upper")
+
+        maybe_add_feature(feature, feature_indexer, add_to_indexer, "next_len_of_token_" + str(len(token)))  # maybe
+
+        if token.isnumeric():
+            maybe_add_feature(feature, feature_indexer, add_to_indexer, "next_is_digit")  # maybe
+
+    else:
+        maybe_add_feature(feature, feature_indexer, add_to_indexer, "eos")  # maybe
+
+    #print(feature)
+
+    return feature, feature_indexer
+
+
+def get_shape(token):
+    rst = re.sub('[a-z]', 'x', token)
+    rst = re.sub('[A-Z]', 'X', rst)
+    rst = re.sub('[0-9]', 'd', rst)
+    return rst
+
 
 def calculate_sparse_gradient(feature, label, weights):
     gradient = Counter()
     score = score_indexed_features(feature, weights)
     for feat in feature:
-        gradient[feat] = label - score
+        gradient[feat] = label - sigmoid(score)
     return gradient
 
-def get_feature(tokens: List[str], pos_tags: List[str],
-                idx: int, indexer: Indexer, pos_indexer: Indexer,
-                prefix_indexer: Indexer, suffix_indexer: Indexer):
-    #feature = np.zeros(len(indexer.objs_to_ints))
-    #for token in tokens:
-    #    np.put(feature, indexer.index_of(token), 1)
-
-    feature = np.zeros(20)
-
-    token = tokens[idx]
-
-    # 0. if the current token has tagged as "PER" most of the times
-    if indexer.contains(token):
-        np.put(feature, 0, 1)
-
-    # 1. if the previous token has tagged as "PER" most of the times
-    if idx > 0 and indexer.contains(tokens[idx-1]):
-        np.put(feature, 1, 1)
-
-    # 2. if the next token has tagged as "PER" most of the times
-    if idx <= len(tokens)-2 and indexer.contains(tokens[idx + 1]):
-        np.put(feature, 2, 1)
-
-    # 3. if begin with upper letter
-    if token[0].isupper():
-        np.put(feature, 3, 1)
-
-    # 4. index
-    np.put(feature, 4, idx)
-
-    # 5.len of word
-    np.put(feature, 5, len(token))
-
-    # 6. pos tag of current word
-    np.put(feature, 6, pos_indexer.index_of(pos_tags[idx]))
-
-    # 7. pos tag of previous word
-    if idx > 0:
-        np.put(feature, 7, pos_indexer.index_of(pos_tags[idx-1]))
-
-    # 8. pos tag of next word
-    if idx <= len(tokens) - 2:
-        np.put(feature, 8, pos_indexer.index_of(pos_tags[idx+1]))
-
-    # 9. 10. prefix and suffix
-    if len(token) > 3:
-        np.put(feature, 9, prefix_indexer.index_of(token[:3]))
-        np.put(feature, 10, suffix_indexer.index_of(token[-3:]))
-
-    # 11. if is the start of the sentence  (not good)
-    #if idx == 0:
-    #    np.put(feature, 11, 1)
-
-    # 12. bias
-    np.put(feature, 12, 1)
-
-    # pos tag sparse
-    #pos_tag_feature = get_sparse_feature(pos_tags[idx], pos_indexer)
-    #feature = np.append(feature, pos_tag_feature)
-
-    # 7. pos tag of previous word
-    #if idx > 0:
-    #    pos_tag_feature = get_sparse_feature(pos_tags[idx-1], pos_indexer)
-    #    feature = np.append(feature, pos_tag_feature)
-    #else:
-    #    feature = np.append(feature, np.zeros(len(pos_indexer)))
-
-    # 8. pos tag of next word
-    #if idx <= len(tokens) - 2:
-     #   pos_tag_feature = get_sparse_feature(pos_tags[idx+1], pos_indexer)
-     #   feature = np.append(feature, pos_tag_feature)
-    #else:
-     #   feature = np.append(feature, np.zeros(len(pos_indexer)))
-
-    #print(len(feature))
-    return feature
 
 def get_sparse_feature_pos(token, indexer):
     feature = np.zeros(len(indexer))
     np.put(feature, indexer.index_of(token), 1)
     return feature
-
-
-def write_features(ner_exs: List[PersonExample], indexer, out_path="data/features"):
-    with open(out_path, "w") as f:
-        for k, ex in enumerate(ner_exs):
-            for idx in range(0, len(ex)):
-                feature = get_feature(ex.tokens, idx, indexer)
-                feature_str = " ".join(str(x) for x in feature)
-                feature_str += "\n"
-                f.write(feature_str)
-
-def array_to_counter(input: np.array):
-    output = Counter()
-    idx = 0
-    for x in np.nditer(input):
-        output[idx] = x
-        idx += 1
-    return output
 
 
 def sigmoid(x: float):
@@ -340,9 +300,6 @@ def train_classifier(ner_exs: List[PersonExample]):
 
     # build vocabulary
     per_indexer = Indexer()
-    pos_indexer = Indexer()
-    prefix_indexer = Indexer()
-    suffix_indexer = Indexer()
     for ex in ner_exs:
         for idx in range(0, len(ex)):
             token = ex.tokens[idx]
@@ -351,33 +308,26 @@ def train_classifier(ner_exs: List[PersonExample]):
             if pos_counts[token] > neg_counts[token]:
                 per_indexer.add_and_get_index(token)
 
-            # Pos tag indexer
-            pos_indexer.add_and_get_index(ex.pos[idx])
-
-            # Prefix & suffix indexer
-            if len(token) > 3:
-                prefix_indexer.add_and_get_index(token[:3])
-                suffix_indexer.add_and_get_index(token[-3:])
-
     dev_class_exs = list(transform_for_classification(read_data(args.dev_path)))
 
     weights = None
-    max_f1 = 0
     features = None
-    #weights = read_weights()
-    if not weights is None:
-        for w in weights:
-            print(str(w))
-    classifier = PersonClassifier(weights, per_indexer, pos_indexer, prefix_indexer, suffix_indexer)
+    classifier = PersonClassifier(weights, per_indexer)
     for epoch in range(1):
         print("Start epoch " + str(epoch))
+
+        if epoch == 3:
+            classifier.optimizer.alpha = 0.1
+
         classifier.weights = weights
         classifier.features = features
         classifier.train(ner_exs)
         weights = classifier.weights
+        features = classifier.features
         evaluate_classifier(dev_class_exs, classifier)
         write_weights(weights)
     return classifier
+
 
 def read_weights(file_path="saved_weights"):
     weights = []
@@ -462,16 +412,16 @@ def predict_write_output_to_file(exs: List[PersonExample], classifier: PersonCla
         f.write("\n")
     f.close()
 
+
 if __name__ == '__main__':
     start_time = time.time()
     args = _parse_args()
     print(args)
+
     # Load the training and test data
     train_class_exs = list(transform_for_classification(read_data(args.train_path)))
     dev_class_exs = list(transform_for_classification(read_data(args.dev_path)))
 
-    #for i in dev_class_exs:
-    #    print(i)
 
     # Train the model
     if args.model == "BAD":
@@ -484,12 +434,19 @@ if __name__ == '__main__':
     evaluate_classifier(train_class_exs, classifier)
     print("===Dev accuracy===")
     evaluate_classifier(dev_class_exs, classifier)
+
     #predict_write_output_to_file(dev_class_exs, classifier, "eng.testa.out")
     if args.run_on_test:
         print("Running on test")
         test_exs = list(transform_for_classification(read_data(args.blind_test_path)))
         predict_write_output_to_file(test_exs, classifier, args.test_output_path)
         print("Wrote predictions on %i labeled sentences to %s" % (len(test_exs), args.test_output_path))
+
+    weights = classifier.weights
+    absolute_weights = np.absolute(weights)
+    indices = absolute_weights.argsort()[:10][::-1]
+    for i in indices:
+        print("{} {} {}".format(i, weights[i], classifier.feature_indexer.get_object(i)))
 
 
 
