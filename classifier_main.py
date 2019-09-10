@@ -18,15 +18,14 @@ def _parse_args():
     """
     parser = argparse.ArgumentParser(description='trainer.py')
     parser.add_argument('--model', type=str, default='BAD', help='model to run (BAD, CLASSIFIER)')
-    #parser.add_argument('--train_path', type=str, default='data/eng.train', help='path to train set (you should not need to modify)')
-    parser.add_argument('--train_path', type=str, default='data/eng_small.train', help='path to train set (you should not need to modify)')
+    parser.add_argument('--train_path', type=str, default='data/eng.train', help='path to train set (you should not need to modify)')
+    #parser.add_argument('--train_path', type=str, default='data/eng_small.train', help='path to train set (you should not need to modify)')
     parser.add_argument('--dev_path', type=str, default='data/eng.testa', help='path to dev set (you should not need to modify)')
     parser.add_argument('--blind_test_path', type=str, default='data/eng.testb.blind', help='path to dev set (you should not need to modify)')
     parser.add_argument('--test_output_path', type=str, default='eng.testb.out', help='output path for test predictions')
     parser.add_argument('--no_run_on_test', dest='run_on_test', default=True, action='store_false', help='skip printing output on the test set')
     args = parser.parse_args()
     return args
-
 
 class PersonExample(object):
     """
@@ -36,9 +35,10 @@ class PersonExample(object):
         tokens: the sentence to classify
         labels: 0 if non-person name, 1 if person name for each token in the sentence
     """
-    def __init__(self, tokens: List[str], labels: List[int]):
+    def __init__(self, tokens: List[str], labels: List[int], pos: List[str]):
         self.tokens = tokens
         self.labels = labels
+        self.pos = pos
 
     def __len__(self):
         return len(self.tokens)
@@ -58,7 +58,8 @@ def transform_for_classification(ner_exs: List[LabeledSentence]):
     for labeled_sent in ner_exs:
         tags = bio_tags_from_chunks(labeled_sent.chunks, len(labeled_sent))
         labels = [1 if tag.endswith("PER") else 0 for tag in tags]
-        yield PersonExample([tok.word for tok in labeled_sent.tokens], labels)
+        pos = [tok.pos for tok in labeled_sent.tokens]
+        yield PersonExample([tok.word for tok in labeled_sent.tokens], labels, pos)
 
 
 class CountBasedPersonClassifier(object):
@@ -106,20 +107,27 @@ class PersonClassifier(object):
     Constructor arguments are merely suggestions; you're free to change these.
     """
 
-    def __init__(self, weights: np.ndarray, indexer: Indexer):
+    def __init__(self, weights: np.ndarray, indexer: Indexer, pos_indexer: Indexer,
+                 prefix_indexer: Indexer, suffix_indexer: Indexer):
         self.weights = weights
         self.indexer = indexer
-        self.optimizer = SGDOptimizer(weights, 0.01)
+        self.pos_indexer = pos_indexer
+        self.prefix_indexer = prefix_indexer
+        self.suffix_indexer = suffix_indexer
+        self.optimizer = None
+        self.features = None
 
-    def predict(self, tokens: List[str], idx: int):
+    def predict(self, tokens: List[str], pos_tags: List[str], idx: int):
         """
         Makes a prediction for token at position idx in the given PersonExample
         :param tokens:
+        :param pos_tags:
         :param idx:
         :return: 0 if not a person token, 1 if a person token
         """
-    def predict(self, tokens, idx):
-        feature = get_feature(tokens, idx, self.indexer)
+    def predict(self, tokens, pos_tags, idx):
+        feature = get_feature(tokens, pos_tags, idx,
+                              self.indexer, self.pos_indexer, self.prefix_indexer, self.suffix_indexer)
         if sigmoid(np.dot(self.weights, feature)) > 0.5:
             return 1
         else:
@@ -131,31 +139,127 @@ class PersonClassifier(object):
         # def apply_gradient_update(self, gradient: Counter, batch_size: int):
         #   for i in gradient.keys():
         #       self.weights[i] = self.weights[i] + self.alpha * gradient[i]
-        for k, ex in enumerate(ner_exs):
-            if k/100 == 0:
-                print("Update example " + str(k))
-                print("Finished " + str(k/len(ner_exs)) + "%")
 
-            for idx in range(0, len(ex)):
-                label = ex.labels[idx]
+        # initialize weights
+        if self.weights is None:
+            feature = get_feature(ner_exs[0].tokens, ner_exs[0].pos, 0,
+                                  self.indexer, self.pos_indexer, self.prefix_indexer, self.suffix_indexer)
+            self.weights = np.random.randn(len(feature))/10
 
-                # generate feature
-                # one-hot representation of each word
-                feature = get_feature(ex.tokens, idx, self.indexer)
+        self.optimizer = L1RegularizedAdagradTrainer(self.weights)
 
+        # get features
+        if self.features is None:
+            print("Start extracting features ...")
+            features = []
+            for k, ex in enumerate(ner_exs):
+                for idx in range(0, len(ex)):
+                    label = ex.labels[idx]
+
+                    # generate feature for this token
+                    feature = get_feature(ex.tokens, ex.pos, idx,
+                                          self.indexer, self.pos_indexer, self.prefix_indexer, self.suffix_indexer)
+
+                    features.append((feature, label))
+            self.features = features
+
+        features = self.features
+
+        # begin training
+        for epoch in range(1):
+            for k, (feature, label) in enumerate(features):
+                if k % 2000 == 0:
+                    print("Update feature " + str(k))
+                    print("Finished " + str(k / len(features)) + "%")
                 # calculate gradient update
                 gradient = np.dot(feature, label - sigmoid(np.dot(self.weights, feature)))
                 gradients = array_to_counter(gradient)
-                self.optimizer.apply_gradient_update(gradients, 10)
+                self.optimizer.apply_gradient_update(gradients, 1)
                 self.weights = self.optimizer.get_final_weights()
 
         print(self.weights)
 
 
-def get_feature(tokens: List[str], idx: int, indexer: Indexer):
-    feature = np.zeros(len(indexer.objs_to_ints))
-    for token in tokens:
-        np.put(feature, indexer.index_of(token), 1)
+def get_feature(tokens: List[str], pos_tags: List[str],
+                idx: int, indexer: Indexer, pos_indexer: Indexer,
+                prefix_indexer: Indexer, suffix_indexer: Indexer):
+    #feature = np.zeros(len(indexer.objs_to_ints))
+    #for token in tokens:
+    #    np.put(feature, indexer.index_of(token), 1)
+
+    feature = np.zeros(20)
+
+    token = tokens[idx]
+
+    # 0. if the current token has tagged as "PER" most of the times
+    if indexer.contains(token):
+        np.put(feature, 0, 1)
+
+    # 1. if the previous token has tagged as "PER" most of the times
+    if idx > 0 and indexer.contains(tokens[idx-1]):
+        np.put(feature, 1, 1)
+
+    # 2. if the next token has tagged as "PER" most of the times
+    if idx <= len(tokens)-2 and indexer.contains(tokens[idx + 1]):
+        np.put(feature, 2, 1)
+
+    # 3. if begin with upper letter
+    if token[0].isupper():
+        np.put(feature, 3, 1)
+
+    # 4. index
+    np.put(feature, 4, idx)
+
+    # 5.len of word
+    np.put(feature, 5, len(token))
+
+    # 6. pos tag of current word
+    np.put(feature, 6, pos_indexer.index_of(pos_tags[idx]))
+
+    # 7. pos tag of previous word
+    if idx > 0:
+        np.put(feature, 7, pos_indexer.index_of(pos_tags[idx-1]))
+
+    # 8. pos tag of next word
+    if idx <= len(tokens) - 2:
+        np.put(feature, 8, pos_indexer.index_of(pos_tags[idx+1]))
+
+    # 9. 10. prefix and suffix
+    if len(token) > 3:
+        np.put(feature, 9, prefix_indexer.index_of(token[:3]))
+        np.put(feature, 10, suffix_indexer.index_of(token[-3:]))
+
+    # 11. if is the start of the sentence  (not good)
+    #if idx == 0:
+    #    np.put(feature, 11, 1)
+
+    # 12. bias
+    np.put(feature, 12, 1)
+
+    # pos tag sparse
+    #pos_tag_feature = get_sparse_feature(pos_tags[idx], pos_indexer)
+    #feature = np.append(feature, pos_tag_feature)
+
+    # 7. pos tag of previous word
+    #if idx > 0:
+    #    pos_tag_feature = get_sparse_feature(pos_tags[idx-1], pos_indexer)
+    #    feature = np.append(feature, pos_tag_feature)
+    #else:
+    #    feature = np.append(feature, np.zeros(len(pos_indexer)))
+
+    # 8. pos tag of next word
+    #if idx <= len(tokens) - 2:
+     #   pos_tag_feature = get_sparse_feature(pos_tags[idx+1], pos_indexer)
+     #   feature = np.append(feature, pos_tag_feature)
+    #else:
+     #   feature = np.append(feature, np.zeros(len(pos_indexer)))
+
+    #print(len(feature))
+    return feature
+
+def get_sparse_feature(token, indexer):
+    feature = np.zeros(len(indexer))
+    np.put(feature, indexer.index_of(token), 1)
     return feature
 
 
@@ -182,22 +286,71 @@ def sigmoid(x: float):
 
 
 def train_classifier(ner_exs: List[PersonExample]):
+    pos_counts = Counter()
+    neg_counts = Counter()
+    for ex in ner_exs:
+        for idx in range(0, len(ex)):
+            if ex.labels[idx] == 1:
+                pos_counts[ex.tokens[idx]] += 1.0
+            else:
+                neg_counts[ex.tokens[idx]] += 1.0
+
     # build vocabulary
-    indexer = Indexer()
+    per_indexer = Indexer()
+    pos_indexer = Indexer()
+    prefix_indexer = Indexer()
+    suffix_indexer = Indexer()
     for ex in ner_exs:
         for idx in range(0, len(ex)):
             token = ex.tokens[idx]
-            indexer.add_and_get_index(token)
 
-    initial_weights = np.zeros(len(indexer.objs_to_ints))
+            # Person indexer
+            if pos_counts[token] > neg_counts[token]:
+                per_indexer.add_and_get_index(token)
 
-    classifier = PersonClassifier(initial_weights, indexer)
+            # Pos tag indexer
+            pos_indexer.add_and_get_index(ex.pos[idx])
 
-    #write_features(train_class_exs, indexer)
+            # Prefix & suffix indexer
+            if len(token) > 3:
+                prefix_indexer.add_and_get_index(token[:3])
+                suffix_indexer.add_and_get_index(token[-3:])
 
-    classifier.train(ner_exs)
+    dev_class_exs = list(transform_for_classification(read_data(args.dev_path)))
 
+    weights = None
+    max_f1 = 0
+    features = None
+    #weights = read_weights()
+    if not weights is None:
+        for w in weights:
+            print(str(w))
+    classifier = PersonClassifier(weights, per_indexer, pos_indexer, prefix_indexer, suffix_indexer)
+    for epoch in range(30):
+        print("Start epoch " + str(epoch))
+        classifier.weights = weights
+        classifier.features = features
+        classifier.train(ner_exs)
+        weights = classifier.weights
+        evaluate_classifier(dev_class_exs, classifier)
+        write_weights(weights)
     return classifier
+
+def read_weights(file_path="saved_weights"):
+    weights = []
+    with open(file_path, "r") as f:
+        lines = f.readlines()
+        for l in lines:
+            weights.append(float(l))
+    weights = np.asarray(weights)
+    return weights
+
+
+def write_weights(weights, file_path="saved_weights"):
+    with open(file_path, "w") as f:
+        for w in weights:
+            f.write(str(w) + "\n")
+    print("Finish writing.")
 
 
 def evaluate_classifier(exs: List[PersonExample], classifier: PersonClassifier):
@@ -211,7 +364,7 @@ def evaluate_classifier(exs: List[PersonExample], classifier: PersonClassifier):
     for ex in exs:
         for idx in range(0, len(ex)):
             golds.append(ex.labels[idx])
-            predictions.append(classifier.predict(ex.tokens, idx))
+            predictions.append(classifier.predict(ex.tokens, ex.pos, idx))
     print_evaluation(golds, predictions)
 
 
@@ -261,7 +414,7 @@ def predict_write_output_to_file(exs: List[PersonExample], classifier: PersonCla
     f = open(outfile, 'w')
     for ex in exs:
         for idx in range(0, len(ex)):
-            prediction = classifier.predict(ex.tokens, idx)
+            prediction = classifier.predict(ex.tokens, ex.pos, idx)
             f.write(ex.tokens[idx] + " " + repr(int(prediction)) + "\n")
         f.write("\n")
     f.close()
@@ -274,8 +427,8 @@ if __name__ == '__main__':
     train_class_exs = list(transform_for_classification(read_data(args.train_path)))
     dev_class_exs = list(transform_for_classification(read_data(args.dev_path)))
 
-    for i in dev_class_exs:
-        print(i)
+    #for i in dev_class_exs:
+    #    print(i)
 
     # Train the model
     if args.model == "BAD":
@@ -288,6 +441,7 @@ if __name__ == '__main__':
     evaluate_classifier(train_class_exs, classifier)
     print("===Dev accuracy===")
     evaluate_classifier(dev_class_exs, classifier)
+    #predict_write_output_to_file(dev_class_exs, classifier, "eng.testa.out")
     if args.run_on_test:
         print("Running on test")
         test_exs = list(transform_for_classification(read_data(args.blind_test_path)))
