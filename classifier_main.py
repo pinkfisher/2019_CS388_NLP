@@ -9,9 +9,9 @@ from optimizers import *
 from typing import List
 import numpy as np
 import re
-from random import seed, shuffle
+import random
 
-seed(0)
+random.seed(0)
 
 def _parse_args():
     """
@@ -153,12 +153,12 @@ class PersonClassifier(object):
 
         # initialize weights
         if self.weights is None:
-            self.weights = np.random.randn(len(self.feature_indexer)+1)/10
-            #self.weights = np.zeros(len(self.feature_indexer)+1)
+            #self.weights = np.random.randn(len(self.feature_indexer)+1)/10
+            self.weights = np.zeros(len(self.feature_indexer)+1)
 
-        self.optimizer = SGDOptimizer(self.weights, 1)
+        #self.optimizer = SGDOptimizer(self.weights, 1)
         #self.optimizer = L1RegularizedAdagradTrainer(self.weights, lamb=1e-8, eta=4.0)
-        #self.optimizer = UnregularizedAdagradTrainer(self.weights, eta=1.0)
+        self.optimizer = UnregularizedAdagradTrainer(self.weights, eta=1.0)
 
         # begin training
         for epoch in range(1):
@@ -178,59 +178,59 @@ def get_sparse_feature(tokens: List[str], pos_tags: List[str], idx: int, indexer
 
     feature = []
 
-    maybe_add_feature(feature, feature_indexer, add_to_indexer, "bias")
+    #maybe_add_feature(feature, feature_indexer, add_to_indexer, "bias")    # maybe (no)
 
     maybe_add_feature(feature, feature_indexer, add_to_indexer, token.lower())
-    #maybe_add_feature(feature, feature_indexer, add_to_indexer, token) (no)
+    maybe_add_feature(feature, feature_indexer, add_to_indexer, token)
 
-    if indexer.contains(token):
-        maybe_add_feature(feature, feature_indexer, add_to_indexer, "is_per")
+    #if indexer.contains(token):
+     #   maybe_add_feature(feature, feature_indexer, add_to_indexer, "is_per")  (no)
 
     maybe_add_feature(feature, feature_indexer, add_to_indexer, "pos_tag_is_"+pos_tags[idx])
 
-    if len(pos_tags[idx]) > 2:
-        maybe_add_feature(feature, feature_indexer, add_to_indexer, "pos_tag_prefix_is_" + pos_tags[idx][:2])
+    #if len(pos_tags[idx]) > 2:
+        #maybe_add_feature(feature, feature_indexer, add_to_indexer, "pos_tag_prefix_is_" + pos_tags[idx][:2])  # no
 
-    #if len(token) > 3:
-    #    maybe_add_feature(feature, feature_indexer, add_to_indexer, "prefix_is_"+token[:3]) (no)
-        #maybe_add_feature(feature, feature_indexer, add_to_indexer, "suffix_is_"+token[-3:]) (no)
+    if len(token) > 3:
+        maybe_add_feature(feature, feature_indexer, add_to_indexer, "prefix_is_"+token.lower()[:3])
+        maybe_add_feature(feature, feature_indexer, add_to_indexer, "suffix_is_"+token[-3:])
 
     if token[0].isupper():
         maybe_add_feature(feature, feature_indexer, add_to_indexer, "is_upper")
 
     #if token.isnumeric():
-     #   maybe_add_feature(feature, feature_indexer, add_to_indexer, "is_digit")  # no effect
+     #   maybe_add_feature(feature, feature_indexer, add_to_indexer, "is_digit")  # maybe no 90.40
 
-    maybe_add_feature(feature, feature_indexer, add_to_indexer, "index_"+str(idx))  # maybe
+    #maybe_add_feature(feature, feature_indexer, add_to_indexer, "index_"+str(idx))  # maybe no 90.30
 
-    #maybe_add_feature(feature, feature_indexer, add_to_indexer, "len_of_token_" + str(len(token)))  (no)
+    #maybe_add_feature(feature, feature_indexer, add_to_indexer, "len_of_token_" + str(len(token)))  # maybe no 90.28
 
-    #maybe_add_feature(feature, feature_indexer, add_to_indexer, "shape_is_" + get_shape(token)) (no)
-
+    maybe_add_feature(feature, feature_indexer, add_to_indexer, "shape_is_" + get_shape(token))
 
     # for previous token
     if idx > 0:
         token = tokens[idx - 1]
         pos_tag = pos_tags[idx - 1]
 
-        maybe_add_feature(feature, feature_indexer, add_to_indexer, "prev_"+token)
+        #maybe_add_feature(feature, feature_indexer, add_to_indexer, "prev_"+token)  # no
+        maybe_add_feature(feature, feature_indexer, add_to_indexer, "prev_"+token.lower())
 
-        if indexer.contains(token):
-            maybe_add_feature(feature, feature_indexer, add_to_indexer, "prev_is_per")
+        #if indexer.contains(token):
+            #maybe_add_feature(feature, feature_indexer, add_to_indexer, "prev_is_per")  # no
 
-        #maybe_add_feature(feature, feature_indexer, add_to_indexer, "prev_pos_tag_is_" + pos_tag) (no)
-        maybe_add_feature(feature, feature_indexer, add_to_indexer, "prev_pos_tag_prefix_is_" + pos_tag[:2])
+        #maybe_add_feature(feature, feature_indexer, add_to_indexer, "prev_pos_tag_is_" + pos_tag)  # 90.93
+        #maybe_add_feature(feature, feature_indexer, add_to_indexer, "prev_pos_tag_prefix_is_" + pos_tag[:2])  # maybe no 90.86
 
-        if token[0].isupper():
-            maybe_add_feature(feature, feature_indexer, add_to_indexer, "prev_is_upper")  # maybe
+        #if token[0].isupper():
+         #   maybe_add_feature(feature, feature_indexer, add_to_indexer, "prev_is_upper")  #  maybe no 90.69
 
-        maybe_add_feature(feature, feature_indexer, add_to_indexer, "prev_len_of_token_" + str(len(token)))  # maybe
+        #maybe_add_feature(feature, feature_indexer, add_to_indexer, "prev_len_of_token_" + str(len(token)))  # no
 
-        if token.isnumeric():
-            maybe_add_feature(feature, feature_indexer, add_to_indexer, "prev_is_digit")  # maybe
+        #if token.isnumeric():
+            #maybe_add_feature(feature, feature_indexer, add_to_indexer, "prev_is_digit")  # no
 
     #else:
-     #   maybe_add_feature(feature, feature_indexer, add_to_indexer, "bos")  # no
+        #maybe_add_feature(feature, feature_indexer, add_to_indexer, "bos")  # maybe no 90.45
 
 
     # for next token
@@ -239,24 +239,25 @@ def get_sparse_feature(tokens: List[str], pos_tags: List[str], idx: int, indexer
         pos_tag = pos_tags[idx + 1]
 
         #maybe_add_feature(feature, feature_indexer, add_to_indexer, "next_"+token)  # no
-    
+        maybe_add_feature(feature, feature_indexer, add_to_indexer, "next_"+token.lower())
 
-        if indexer.contains(token):
-            maybe_add_feature(feature, feature_indexer, add_to_indexer, "next_is_per")
 
-        maybe_add_feature(feature, feature_indexer, add_to_indexer, "next_pos_tag_is_" + pos_tag)
-        maybe_add_feature(feature, feature_indexer, add_to_indexer, "next_pos_tag_prefix_is_" + pos_tag[:2])  # maybe
+        #if indexer.contains(token):
+         #   maybe_add_feature(feature, feature_indexer, add_to_indexer, "next_is_per")  (no)
 
-        if token[0].isupper():
-            maybe_add_feature(feature, feature_indexer, add_to_indexer, "next_is_upper")
+        maybe_add_feature(feature, feature_indexer, add_to_indexer, "next_pos_tag_is_" + pos_tag)  # 90.51
+        #maybe_add_feature(feature, feature_indexer, add_to_indexer, "next_pos_tag_prefix_is_" + pos_tag[:2])  # no
 
-        maybe_add_feature(feature, feature_indexer, add_to_indexer, "next_len_of_token_" + str(len(token)))  # maybe
+        #if token[0].isupper():
+         #   maybe_add_feature(feature, feature_indexer, add_to_indexer, "next_is_upper")  (no)
 
-        if token.isnumeric():
-            maybe_add_feature(feature, feature_indexer, add_to_indexer, "next_is_digit")  # maybe
+        #maybe_add_feature(feature, feature_indexer, add_to_indexer, "next_len_of_token_" + str(len(token)))  # no
 
-    else:
-        maybe_add_feature(feature, feature_indexer, add_to_indexer, "eos")  # maybe
+        #if token.isnumeric():
+            #maybe_add_feature(feature, feature_indexer, add_to_indexer, "next_is_digit")  # maybe no
+
+    #else:
+        #maybe_add_feature(feature, feature_indexer, add_to_indexer, "eos")  # maybe no
 
     #print(feature)
 
@@ -354,11 +355,24 @@ def evaluate_classifier(exs: List[PersonExample], classifier: PersonClassifier):
     """
     predictions = []
     golds = []
+    wrongs = []
     for ex in exs:
         for idx in range(0, len(ex)):
-            golds.append(ex.labels[idx])
-            predictions.append(classifier.predict(ex.tokens, ex.pos, idx))
+            gold = ex.labels[idx]
+            predict = classifier.predict(ex.tokens, ex.pos, idx)
+            golds.append(gold)
+            predictions.append(predict)
+            if gold != predict:
+                wrongs.append((ex, idx))
     print_evaluation(golds, predictions)
+    with open("wrong_prediction", "w") as f:
+        for ex, idx in wrongs:
+            f.write(str(idx) + "\n")
+            f.write(ex.tokens[idx] + "\t")
+            f.write(str(ex.labels[idx]) + "\n")
+            f.write(" ".join(ex.tokens) + "\n")
+
+
 
 
 def print_evaluation(golds: List[int], predictions: List[int]):
