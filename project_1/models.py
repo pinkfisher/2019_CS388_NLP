@@ -60,13 +60,89 @@ class HmmNerModel(object):
         self.transition_log_probs = transition_log_probs
         self.emission_log_probs = emission_log_probs
 
-    def decode(self, sentence_tokens: List[Token]):
+    def decode1(self, sentence_tokens: List[Token]):
         """
         See BadNerModel for an example implementation
         :param sentence_tokens: List of the tokens in the sentence to tag
         :return: The LabeledSentence consisting of predictions over the sentence
         """
-        raise Exception("IMPLEMENT ME")
+        scorer = ProbabilisticSequenceScorer(self.tag_indexer, self.word_indexer, self.init_log_probs,
+                                             self.transition_log_probs, self.emission_log_probs)
+        return viterbi(sentence_tokens, scorer)
+
+
+    # Takes a LabeledSentence object and returns a new copy of that sentence with a set of chunks predicted by
+    # the HMM model. See BadNerModel for an example implementation
+    def decode(self, sentence):
+        pred_tags = []
+        scorer = ProbabilisticSequenceScorer(self.tag_indexer, self.word_indexer, self.init_log_probs,
+                                             self.transition_log_probs, self.emission_log_probs)
+
+        # Implements the viterbi algorithm based upon fig 10.8 of the book "Speech and Language Processing (3rd ed. draft)"
+        # NOTE: since the whole code adopts the $\pi, QA$ representation (see Section 9.2), we don't need the start and end state.
+        T = len(sentence)  # Number of observations
+        N = len(self.tag_indexer)  # Number of states
+        viterbi = np.zeros(shape=(N, T))  # Create a path probability matrix viterbi[N,T]
+        backpointer = np.zeros(shape=(N, T))
+
+        # Initialization step
+        for s in range(N):
+            # "+" because the probabilities are log-based
+            viterbi[s, 0] = scorer.score_init(sentence, s) + scorer.score_emission(sentence, s, 0)
+            backpointer[s, 0] = 0
+
+        # Recursion step
+        for t in range(1, T):
+            for s in range(N):
+                tmp1 = np.zeros(N)  # build the candidate values for viterbi
+                tmp2 = np.zeros(N)  # build the candidate values for backpointer
+                for s_tmp in range(N):
+                    # "+" because the probabilities are log-based
+                    tmp1[s_tmp] = viterbi[s_tmp, t - 1] + scorer.score_transition(sentence, s_tmp,
+                                                                                  s) + scorer.score_emission(sentence,
+                                                                                                             s, t)
+                    tmp2[s_tmp] = viterbi[s_tmp, t - 1] + scorer.score_transition(sentence, s_tmp, s)
+                viterbi[s, t] = np.max(tmp2) + scorer.score_emission(sentence, s, t)
+                backpointer[s, t] = np.argmax(tmp2)
+
+        # Termination step (skipped because we don't have the end state)
+        # Backtrace
+        pred_tags.append(self.tag_indexer.get_object(np.argmax(viterbi[:, T - 1])))
+        for t in range(1, T):
+            pred_tags.append(self.tag_indexer.get_object(backpointer[self.tag_indexer.index_of(pred_tags[-1]), T - t]))
+
+        pred_tags = list(reversed(pred_tags))
+        return LabeledSentence(sentence, chunks_from_bio_tag_seq(pred_tags))
+
+
+def viterbi(sentence: List[Token], scorer: ProbabilisticSequenceScorer):
+    N = len(sentence)  # num_tokens
+    T = len(scorer.tag_indexer)  # num_tags
+    v = np.zeros((N, T))  # prob for observing x = v_i when hidden state y = v_j
+    y_max_prev = np.zeros((N, T))    # which y_prev gives the best y_current
+
+    # Initial states
+    for y in range(T):  # for all possible state y
+        # prob of having state y, producing the first token
+        v[0, y] = scorer.score_init(sentence, y) + scorer.score_emission(sentence, y, 0)
+
+    for i in range(1, N):   # for every other token in the sentence
+        for y in range(T):      # for every state y
+            previous_prob = np.zeros(T)
+            for y_prev in range(T):
+                previous_prob[y_prev] = scorer.score_transition(sentence, y_prev, y) + v[i-1, y_prev]
+            v[i, y] = scorer.score_emission(sentence, y, i) + np.max(previous_prob)
+            y_max_prev[i, y] = np.argmax(previous_prob)
+
+    idx = np.argmax(v[-1, :])   # find the most possible last state
+    pred_tags = [(scorer.tag_indexer.get_object(idx))]
+    for t in range(1, N):  # trace back
+        idx = y_max_prev[N - t, idx]
+        pred_tags.append(scorer.tag_indexer.get_object(idx))
+
+    pred_tags.reverse()
+
+    return LabeledSentence(sentence, chunks_from_bio_tag_seq(pred_tags))
 
 
 def train_hmm_model(sentences: List[LabeledSentence]) -> HmmNerModel:
@@ -95,8 +171,8 @@ def train_hmm_model(sentences: List[LabeledSentence]) -> HmmNerModel:
     # Count occurrences of initial tags, transitions, and emissions
     # Apply additive smoothing to avoid log(0) / infinities / etc.
     init_counts = np.ones((len(tag_indexer)), dtype=float) * 0.001
-    transition_counts = np.ones((len(tag_indexer),len(tag_indexer)), dtype=float) * 0.001
-    emission_counts = np.ones((len(tag_indexer),len(word_indexer)), dtype=float) * 0.001
+    transition_counts = np.ones((len(tag_indexer), len(tag_indexer)), dtype=float) * 0.001
+    emission_counts = np.ones((len(tag_indexer), len(word_indexer)), dtype=float) * 0.001
     for sentence in sentences:
         bio_tags = sentence.get_bio_tags()
         for i in range(0, len(sentence)):
