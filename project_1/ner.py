@@ -86,10 +86,18 @@ if __name__ == '__main__':
     # Train our model
     if system_to_run == "BAD":
         bad_model = train_bad_ner_model(train)
-        dev_decoded = [bad_model.decode(test_ex.tokens) for test_ex in dev]
+        #dev_decoded = [bad_model.decode(test_ex.tokens) for test_ex in dev]
+        dev_decoded = [bad_model.decode(dev[10].tokens)]
+        print("-" * 20)
+        print(dev_decoded)
+        print("-" * 20)
     elif system_to_run == "HMM":
         hmm_model = train_hmm_model(train)
         dev_decoded = [hmm_model.decode(test_ex.tokens) for test_ex in dev]
+        """dev_decoded = [hmm_model.decode(dev[10].tokens)]
+        print("-" * 20)
+        print(dev_decoded)
+        print("-" * 20)"""
     elif system_to_run == "CRF":
         crf_model = train_crf_model(train)
         print("Data reading and training took %f seconds" % (time.time() - start_time))

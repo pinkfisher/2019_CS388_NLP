@@ -202,5 +202,53 @@ def test_beam():
     beam.add("f", 6.5)
     print("Should contain e, b, f, c, a: %s" % beam)
 
+
+# Map from objects to doubles that has a default value of 0 for all elements
+# Relatively inefficient (dictionary-backed); shouldn't be used for anything very large-scale,
+# instead use an Indexer over the objects and use a numpy array to store the values
+class myCounter(object):
+    def __init__(self):
+        self.counter = {}
+
+    def __repr__(self):
+        return str([str(key) + ": " + str(self.get_count(key)) for key in self.counter.keys()])
+
+    def __len__(self):
+        return len(self.counter)
+
+    def keys(self):
+        return self.counter.keys()
+
+    def get_count(self, key):
+        if key in self.counter:
+            return self.counter[key]
+        else:
+            return 0
+
+    def increment_count(self, obj, count):
+        if obj in self.counter:
+            self.counter[obj] = self.counter[obj] + count
+        else:
+            self.counter[obj] = count
+
+    def increment_all(self, objs_list, count):
+        for obj in objs_list:
+            self.increment_count(obj, count)
+
+    def set_count(self, obj, count):
+        self.counter[obj] = count
+
+    def add(self, otherCounter):
+        for key in otherCounter.counter.keys():
+            self.increment_count(key, otherCounter.counter[key])
+
+    # Bad O(n) implementation right now
+    def argmax(self):
+        best_key = None
+        for key in self.counter.keys():
+            if best_key is None or self.get_count(key) > self.get_count(best_key):
+                best_key = key
+        return best_key
+
 if __name__ == '__main__':
     test_beam()
