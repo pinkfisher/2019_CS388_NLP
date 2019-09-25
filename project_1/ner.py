@@ -8,6 +8,7 @@ from utils import *
 from models import *
 from collections import Counter
 from typing import List
+import pickle
 
 
 def _parse_args():
@@ -23,6 +24,10 @@ def _parse_args():
     parser.add_argument('--blind_test_path', type=str, default='data/eng.testb.blind', help='path to blind test set (you should not need to modify)')
     parser.add_argument('--test_output_path', type=str, default='eng.testb.out', help='output path for test predictions')
     parser.add_argument('--no_run_on_test', dest='run_on_test', default=True, action='store_false', help='skip printing output on the test set')
+    parser.add_argument('--run_experiments', dest='run_experiments', default=False, action='store_true', help='run experiments and print evaluations on the dev set')
+    parser.add_argument('--beam', dest='use_beam_search', default=False, action='store_true', help='use beam search to decode')
+    parser.add_argument('--beam_size', dest='beam_size', default=1, type=int, help='how large the beam is')
+    parser.add_argument('--load', dest='load_model', default=False, action='store_true', help='load exsiting model')
     args = parser.parse_args()
     return args
 
@@ -69,6 +74,17 @@ def train_bad_ner_model(training_set: List[LabeledSentence]) -> BadNerModel:
     return BadNerModel(words_to_tag_counters)
 
 
+def save_object(obj, filename):
+    with open(filename, 'wb') as output:  # Overwrites any existing file.
+        pickle.dump(obj, output, pickle.HIGHEST_PROTOCOL)
+
+
+def load_object(filename):
+    print("Loading model ...")
+    with open(filename, 'rb') as input:
+        return pickle.load(input)
+
+
 if __name__ == '__main__':
     start_time = time.time()
     args = _parse_args()
@@ -86,22 +102,28 @@ if __name__ == '__main__':
     # Train our model
     if system_to_run == "BAD":
         bad_model = train_bad_ner_model(train)
-        #dev_decoded = [bad_model.decode(test_ex.tokens) for test_ex in dev]
-        dev_decoded = [bad_model.decode(dev[10].tokens)]
-        print("-" * 20)
-        print(dev_decoded)
-        print("-" * 20)
+        dev_decoded = [bad_model.decode(test_ex.tokens) for test_ex in dev]
     elif system_to_run == "HMM":
-        hmm_model = train_hmm_model(train)
-        dev_decoded = [hmm_model.decode(test_ex.tokens) for test_ex in dev]
-        """dev_decoded = [hmm_model.decode(dev[10].tokens)]
-        print("-" * 20)
-        print(dev_decoded)
-        print("-" * 20)"""
+        if args.load_model:
+            hmm_model = load_object("model/hmm.pkl")
+        else:
+            hmm_model = train_hmm_model(train)
+            save_object(hmm_model, "model/hmm.pkl")
+        if args.use_beam_search:
+            dev_decoded = [hmm_model.beam_search(test_ex.tokens, beam_size=args.beam_size) for test_ex in dev]
+        else:
+            dev_decoded = [hmm_model.decode(test_ex.tokens) for test_ex in dev]
     elif system_to_run == "CRF":
-        crf_model = train_crf_model(train)
+        if args.load_model:
+            crf_model = load_object("model/crf.pkl")
+        else:
+            crf_model = train_crf_model(train, run_experiments=args.run_experiments)
+            save_object(crf_model, "model/crf.pkl")
         print("Data reading and training took %f seconds" % (time.time() - start_time))
-        dev_decoded = [crf_model.decode(test_ex.tokens) for test_ex in dev]
+        if args.use_beam_search:
+            dev_decoded = [crf_model.beam_search(test_ex.tokens, beam_size=args.beam_size) for test_ex in dev]
+        else:
+            dev_decoded = [crf_model.decode(test_ex.tokens) for test_ex in dev]
         if args.run_on_test:
             print("Running on test")
             test = read_data(args.blind_test_path)
@@ -110,4 +132,5 @@ if __name__ == '__main__':
     else:
         raise Exception("Pass in either BAD, HMM, or CRF to run the appropriate system")
     # Print the evaluation statistics
+    print("Final evaluation:")
     print_evaluation(dev, dev_decoded)

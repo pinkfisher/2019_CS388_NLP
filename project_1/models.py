@@ -72,9 +72,6 @@ class HmmNerModel(object):
                                              self.transition_log_probs, self.emission_log_probs)
         return viterbi(sentence_tokens, scorer)
 
-
-    # Takes a LabeledSentence object and returns a new copy of that sentence with a set of chunks predicted by
-    # the HMM model. See BadNerModel for an example implementation
     def decode(self, sentence):
         pred_tags = []
         scorer = ProbabilisticSequenceScorer(self.tag_indexer, self.word_indexer, self.init_log_probs,
@@ -104,7 +101,7 @@ class HmmNerModel(object):
                                                                                   s) + scorer.score_emission(sentence,
                                                                                                              s, t)
                     tmp2[s_tmp] = viterbi[s_tmp, t - 1] + scorer.score_transition(sentence, s_tmp, s)
-                viterbi[s, t] = np.max(tmp2) + scorer.score_emission(sentence, s, t)
+                viterbi[s, t] = np.max(tmp1)
                 backpointer[s, t] = np.argmax(tmp2)
 
         # Termination step (skipped because we don't have the end state)
@@ -112,6 +109,40 @@ class HmmNerModel(object):
         pred_tags.append(self.tag_indexer.get_object(np.argmax(viterbi[:, T - 1])))
         for t in range(1, T):
             pred_tags.append(self.tag_indexer.get_object(backpointer[self.tag_indexer.index_of(pred_tags[-1]), T - t]))
+
+        pred_tags = list(reversed(pred_tags))
+        return LabeledSentence(sentence, chunks_from_bio_tag_seq(pred_tags))
+
+    def beam_search(self, sentence: List[Token], beam_size=9):
+        N = len(sentence)
+        T = len(self.tag_indexer)
+        beam_list = []
+
+        scorer = ProbabilisticSequenceScorer(self.tag_indexer, self.word_indexer, self.init_log_probs,
+                                             self.transition_log_probs, self.emission_log_probs)
+        pred_tags = []
+
+        # Initialization step
+        beam = Beam(beam_size)
+        for y in range(T):
+            score = scorer.score_init(sentence, y) + scorer.score_emission(sentence, y, 0)
+            beam.add(self.tag_indexer.get_object(y), score)
+        beam_list.append(beam)
+
+        # Recursion step
+        for t in range(1, N):
+            beam = Beam(beam_size)
+            for i in beam_list[t - 1].get_elts_and_scores():
+                y_prev = self.tag_indexer.index_of(i[0])
+                for y in range(T):
+                    score = scorer.score_transition(sentence, y_prev, y) + scorer.score_emission(sentence, y, t)
+                    beam.add(self.tag_indexer.get_object(y), i[1] + score)
+            beam_list.append(beam)
+
+        # Backtrace
+        beam_list = reversed(beam_list)
+        for beam in beam_list:
+            pred_tags.append(beam.head())
 
         pred_tags = list(reversed(pred_tags))
         return LabeledSentence(sentence, chunks_from_bio_tag_seq(pred_tags))
@@ -136,10 +167,10 @@ def viterbi(sentence: List[Token], scorer: ProbabilisticSequenceScorer):
             v[i, y] = scorer.score_emission(sentence, y, i) + np.max(previous_prob)
             y_max_prev[i, y] = np.argmax(previous_prob)
 
-    idx = np.argmax(v[-1, :])   # find the most possible last state
+    idx = int(np.argmax(v[-1, :]))   # find the most possible last state
     pred_tags = [(scorer.tag_indexer.get_object(idx))]
     for t in range(1, N):  # trace back
-        idx = y_max_prev[N - t, idx]
+        idx = int(y_max_prev[N - t, idx])
         pred_tags.append(scorer.tag_indexer.get_object(idx))
 
     pred_tags.reverse()
@@ -230,60 +261,60 @@ class CrfNerModel(object):
         # start_time = time.time()
 
         pred_tags = []
-        T = len(sentence)
-        N = len(self.tag_indexer)
-        viterbi = np.zeros(shape=(N, T))
-        backpointer = np.zeros(shape=(N, T))
+        N = len(sentence)
+        T = len(self.tag_indexer)
+        v = np.zeros(shape=(T, N))
+        max_prev = np.zeros(shape=(T, N))
 
-        score_matrix = np.zeros(shape=(N, T))
-        for s in range(N):
-            for t in range(T):
+        score_matrix = np.zeros(shape=(T, N))
+        for y in range(T):
+            for i in range(N):
                 features = extract_emission_features(sentence,
-                                                     t,
-                                                     self.tag_indexer.get_object(s),
+                                                     i,
+                                                     self.tag_indexer.get_object(y),
                                                      self.feature_indexer,
                                                      add_to_indexer=False)
                 score = sum([self.feature_weights[i] for i in features])
-                score_matrix[s, t] = score
+                score_matrix[y, i] = score
 
         # Initialization step
-        for s in range(N):
+        for y in range(T):
             # "+" because the probabilities are log-based
-            tag = str(self.tag_indexer.get_object(s))
+            tag = str(self.tag_indexer.get_object(y))
             if (isI(tag)):
-                viterbi[s, 0] = float("-inf")
+                v[y, 0] = float("-inf")
             else:
-                viterbi[s, 0] = score_matrix[s, 0]
-            backpointer[s, 0] = 0
+                v[y, 0] = score_matrix[y, 0]
+            max_prev[y, 0] = 0
 
         # Recursion step
-        for t in range(1, T):
-            for s in range(N):
-                tmp1 = np.zeros(N)
-                tmp2 = np.zeros(N)
-                for s_tmp in range(N):
+        for i in range(1, N):
+            for y in range(T):
+                #tmp1 = np.zeros(T)
+                prev_prob = np.zeros(T)
+                for y_prev in range(T):
                     # "+" because the probabilities are log-based
                     # We want to ban out certain scenario:
                     # 1. We cannot have O, I tag sequence of any type
                     # 2. We cannot have I-x, I-y tag sequence of different types
                     # 3. We cannot have B-x, I-y tag sequence of any type of I other than x
-                    prev_tag = str(self.tag_indexer.get_object(s_tmp))
-                    curr_tag = str(self.tag_indexer.get_object(s))
+                    prev_tag = str(self.tag_indexer.get_object(y_prev))
+                    curr_tag = str(self.tag_indexer.get_object(y))
                     if (isO(prev_tag) and isI(curr_tag)) or \
                             (isI(prev_tag) and isI(curr_tag) and get_tag_label(prev_tag) != get_tag_label(curr_tag)) or \
                             (isB(prev_tag) and isI(curr_tag) and get_tag_label(prev_tag) != get_tag_label(curr_tag)):
-                        tmp1[s_tmp] = float("-inf")
-                        tmp2[s_tmp] = float("-inf")
+                        #tmp1[y_prev] = float("-inf")
+                        prev_prob[y_prev] = float("-inf")
                     else:
-                        tmp1[s_tmp] = viterbi[s_tmp, t - 1] + score_matrix[s, t]
-                        tmp2[s_tmp] = viterbi[s_tmp, t - 1]
-                viterbi[s, t] = np.max(tmp1)
-                backpointer[s, t] = np.argmax(tmp2)
+                        #tmp1[y_prev] = v[y_prev, i - 1] + score_matrix[y, i]
+                        prev_prob[y_prev] = v[y_prev, i - 1]
+                v[y, i] = np.max(prev_prob) + score_matrix[y, i]
+                max_prev[y, i] = np.argmax(prev_prob)
                 # Termination step (skipped because we don't have the end state)
         # Backtrace
-        pred_tags.append(self.tag_indexer.get_object(np.argmax(viterbi[:, T - 1])))
-        for t in range(1, T):
-            pred_tags.append(self.tag_indexer.get_object(backpointer[self.tag_indexer.index_of(pred_tags[-1]), T - t]))
+        pred_tags.append(self.tag_indexer.get_object(np.argmax(v[:, N - 1])))
+        for i in range(1, N):
+            pred_tags.append(self.tag_indexer.get_object(max_prev[self.tag_indexer.index_of(pred_tags[-1]), N - i]))
 
         pred_tags = list(reversed(pred_tags))
 
@@ -296,9 +327,77 @@ class CrfNerModel(object):
 
         return LabeledSentence(sentence, chunks_from_bio_tag_seq(pred_tags))
 
+    def beam_search(self, sentence, beam_size=2):
+        # NOTE: beam is sorted by its score. The largest score will stay at top
+
+        # Start a timer
+        # start_time = time.time()
+
+        N = len(sentence)
+        T = len(self.tag_indexer)
+        beam_list = []
+        pred_tags = []
+
+        # Initialization step
+        beam = Beam(beam_size)
+        for y in range(T):
+            tag = str(self.tag_indexer.get_object(y))
+            if (isI(tag)):
+                score = float("-inf")
+            else:
+                features = extract_emission_features(sentence,
+                                                     0,
+                                                     self.tag_indexer.get_object(y),
+                                                     self.feature_indexer,
+                                                     False)
+                score = score_indexed_features(features, self.feature_weights)
+            beam.add(self.tag_indexer.get_object(y), score)
+        beam_list.append(beam)
+
+        # Recursion step
+        for x in range(1, N):
+            beam = Beam(beam_size)
+            for i in beam_list[x - 1].get_elts_and_scores():
+                j = self.tag_indexer.index_of(i[0])
+                for y in range(T):
+                    # We want to ban out certain scenario:
+                    # 1. We cannot have O, I tag sequence of any type
+                    # 2. We cannot have I-x, I-y tag sequence of different types
+                    # 3. We cannot have B-x, I-y tag sequence of any type of I other than x
+                    prev_tag = str(j)
+                    curr_tag = str(self.tag_indexer.get_object(y))
+                    if (isO(prev_tag) and isI(curr_tag)) and \
+                            (isI(prev_tag) and isI(curr_tag) and get_tag_label(prev_tag) != get_tag_label(curr_tag)) and \
+                            (isB(prev_tag) and isI(curr_tag) and get_tag_label(prev_tag) != get_tag_label(curr_tag)):
+                        score = float("-inf")
+                    else:
+                        features = extract_emission_features(sentence,
+                                                             x,
+                                                             self.tag_indexer.get_object(y),
+                                                             self.feature_indexer,
+                                                             add_to_indexer=False)
+                        score = score_indexed_features(features, self.feature_weights)
+                    beam.add(self.tag_indexer.get_object(y), i[1] + score)
+            beam_list.append(beam)
+
+        # Backtrace
+        beam_list = reversed(beam_list)
+        for beam in beam_list:
+            pred_tags.append(beam.head())
+
+        pred_tags = list(reversed(pred_tags))
+
+        # Calculate the amount of time used for one sentence
+        # elapsed_time = time.time() - start_time
+        # hours, rem = divmod(elapsed_time, 3600)
+        # minutes, seconds = divmod(rem, 60)
+        # print('[beam] time eplased: {:0>2}:{:05.2f}'.format(int(minutes), seconds))
+
+        return LabeledSentence(sentence, chunks_from_bio_tag_seq(pred_tags))
+
 
 # Trains a CrfNerModel on the given corpus of sentences.
-def train_crf_model(sentences):
+def train_crf_model(sentences, run_experiments=False):
     tag_indexer = Indexer()
     for sentence in sentences:
         for tag in sentence.get_bio_tags():
@@ -320,88 +419,91 @@ def train_crf_model(sentences):
 
     optimizer = SGDOptimizer(feature_weights, 0.1)
 
-    total_num_epoch = 5
+    total_num_epoch = 50
     for epoch in range(total_num_epoch):
         loss = 0
         # Start a timer
         start_time = time.time()
 
+
         # For each sentence in the training set
-        for sentence_idx in range(num_sentences):
+        train_index = np.arange(num_sentences)
+        np.random.shuffle(train_index)
+        for sentence_idx in train_index:
             gradients = Counter()
 
-            T = len(sentences[sentence_idx])  # Number of observations
-            N = len(tag_indexer)  # Number of states
+            N = len(sentences[sentence_idx])  # Number of observations
+            T = len(tag_indexer)  # Number of states
 
             # Construct feature matrix
-            feature_matrix = np.zeros(shape=(N, T))
-            for s in range(N):
-                for t in range(T):
+            feature_matrix = np.zeros(shape=(T, N))
+            for y in range(T):
+                for x in range(N):
                     # Calculate $\phi_e(y_i,i,\pmb{x})$
-                    feature_matrix[s, t] = np.sum(np.take(feature_weights, feature_cache[sentence_idx][t][s]))
+                    feature_matrix[y, x] = np.sum(np.take(feature_weights, feature_cache[sentence_idx][x][y]))
 
-            forward = np.zeros(shape=(N, T))  # create a matrix to store the forward probabilities
-            backward = np.zeros(shape=(N, T))  # create a matrix to store the backward probabilities
+            forward = np.zeros(shape=(T, N))  # create a matrix to store the forward probabilities
+            backward = np.zeros(shape=(T, N))  # create a matrix to store the backward probabilities
 
             #   Forward-backward algorithm to calculate P(y_i = s | X)
             #   NOTE: I ignore transition feature for now
 
             #  Forward
             # Initialization step
-            for s in range(N):
-                forward[s, 0] = feature_matrix[s, 0]
+            for y in range(T):
+                forward[y, 0] = feature_matrix[y, 0]
 
             # Recursion step
-            for t in range(1, T):
-                for s in range(N):
+            for x in range(1, N):
+                for y in range(T):
                     # sum = logsumexp(forward[:,t-1])
                     sum = 0
-                    for i in range(N):
-                        if i == 0:
-                            sum = forward[i, t - 1]
+                    for y_prev in range(T):
+                        if y_prev == 0:
+                            sum = forward[y_prev, x - 1]
                         else:
-                            sum = np.logaddexp(sum, forward[i, t - 1])
-                    forward[s, t] = feature_matrix[s, t] + sum
+                            sum = np.logaddexp(sum, forward[y_prev, x - 1])
+                    forward[y, x] = feature_matrix[y, x] + sum
 
             # Backward
             # Initialization step
-            for s in range(N):
-                backward[s, T - 1] = 0  # alternatively, backward[:,-1] = 0
+            for y in range(T):
+                backward[y, N - 1] = 0  # alternatively, backward[:,-1] = 0
 
             # Recursion step
-            for t in range(1, T):
-                for s in range(N):
+            for x in range(1, N):
+                for y in range(T):
                     sum = 0
-                    for i in range(N):
-                        if i == 0:
-                            sum = backward[i, T - t] + feature_matrix[i, T - t]
+                    for y_prev in range(T):
+                        if y_prev == 0:
+                            sum = backward[y_prev, N - x] + feature_matrix[y_prev, N - x]
                         else:
-                            sum = np.logaddexp(sum, backward[i, T - t] + feature_matrix[i, T - t])
-                    backward[s, T - t - 1] = sum
+                            sum = np.logaddexp(sum, backward[y_prev, N - x] + feature_matrix[y_prev, N - x])
+                    backward[y, N - x - 1] = sum
 
             # Calculate normalizing constant Z in log space
             # Z is a constant. Since the last column of the backward matrix contains all 0s,
             # we can use the last column to avoid using backward matrix.
             Z = 0
-            for s in range(N):
-                if s == 0:
-                    Z = forward[s, -1]
+            for y in range(T):
+                if y == 0:
+                    Z = forward[y, -1]
                 else:
-                    Z = np.logaddexp(Z, forward[s, -1])
+                    Z = np.logaddexp(Z, forward[y, -1])
 
             # Check if Z value if the same
             test_normalizing_constant = False
             if test_normalizing_constant:
                 Z1 = forward[0, 0]+backward[0, 0]
-                for s in range(1, N):
-                    Z1 = np.logaddexp(Z1, forward[s, 0]+backward[s, 0])
+                for y in range(1, T):
+                    Z1 = np.logaddexp(Z1, forward[y, 0]+backward[y, 0])
                 np.testing.assert_almost_equal(Z, Z1)
 
             # Compute the posterior probability -P(y_i = s | X)
-            p_y_s_x = np.zeros(shape=(N, T))
-            for s in range(N):
-                for t in range(T):
-                    p_y_s_x[s, t] = np.exp(forward[s, t] + backward[s, t] - Z)
+            p_y_s_x = np.zeros(shape=(T, N))
+            for y in range(T):
+                for x in range(N):
+                    p_y_s_x[y, x] = np.exp(forward[y, x] + backward[y, x] - Z)
 
             #  Compute the stochastic gradient of the feature vector for a sentence
             #  gradients = sum of gold features - expected features under model
@@ -414,7 +516,7 @@ def train_crf_model(sentences):
                     gradients[feature] += 1  # feature value is 0 or 1
 
                 # Calculate expected features = p(y_i = s | x) * feature
-                for tag_idx in range(N):
+                for tag_idx in range(T):
                     features = feature_cache[sentence_idx][word_idx][tag_idx]
                     for feature in features:
                         gradients[feature] -= p_y_s_x[tag_idx, word_idx]
@@ -429,15 +531,11 @@ def train_crf_model(sentences):
         minutes, seconds = divmod(rem, 60)
         print('epoch: {} time eplased: {:0>2}:{:05.2f}. loss: {}'.format(epoch, int(minutes), seconds, loss))
 
-        # Run bunch of experimentations to gather the data for plot
-        if os.getenv('CRF_EXP', default=False):
+        # Run experiments
+        if run_experiments and epoch % 5 == 0:
             crf_model = CrfNerModel(tag_indexer, feature_indexer, optimizer.get_final_weights())
-            if os.getenv('CRF_ENG', default=False):
-                # Gather the data on Accuracy vs. epoch on dev set
-                dev = read_data("data/eng.testa")
-            elif os.getenv('CRF_DEU', default=False):
-                dev = read_data("data/deu.testa")
-            dev_decoded = [crf_model.decode(test_ex) for test_ex in dev]
+            dev = read_data("data/eng.testa")
+            dev_decoded = [crf_model.decode(test_ex.tokens) for test_ex in dev]
             print_evaluation(dev, dev_decoded)
     return CrfNerModel(tag_indexer, feature_indexer, optimizer.get_final_weights())
 
@@ -474,7 +572,6 @@ def extract_emission_features(sentence_tokens: List[Token], word_index: int, tag
         maybe_add_feature(feats, feature_indexer, add_to_indexer, tag + ":Pos" + repr(idx_offset) + "=" + active_pos)
 
     # Character n-grams of the current word
-    """
     max_ngram_size = 3
     for ngram_size in range(1, max_ngram_size+1):
         start_ngram = curr_word[0:min(ngram_size, len(curr_word))]
@@ -495,6 +592,6 @@ def extract_emission_features(sentence_tokens: List[Token], word_index: int, tag
         else:
             new_word += "?"
     maybe_add_feature(feats, feature_indexer, add_to_indexer, tag + ":WordShape=" + repr(new_word))
-    """
+
     return np.asarray(feats, dtype=int)
 
