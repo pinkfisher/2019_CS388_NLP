@@ -12,7 +12,7 @@ import random
 # Returns probabilities; in general your network can be set up to return probabilities, log probabilities,
 # or (log) probabilities + loss
 class FFNN(nn.Module):
-    """def __init__(self, inp, hid, out):
+    def __init__(self, inp, hid, out):
         super(FFNN, self).__init__()
         self.V = nn.Linear(inp, hid)
         self.g = nn.Tanh()
@@ -25,27 +25,7 @@ class FFNN(nn.Module):
     # Forward computation. Backward computation is done implicitly (nn.Module already has an implementation of
     # it that you shouldn't need to override)
     def forward(self, x):
-        return self.softmax(self.W(self.g(self.V(x))))"""
-
-    def __init__(self, inp, hid, out):
-        super(FFNN, self).__init__()
-        self.W1 = nn.Linear(inp, hid)
-        self.W2 = nn.Linear(hid, hid)
-        self.W3 = nn.Linear(hid, out)
-        self.g = nn.ReLU()
-        self.g2 = nn.ReLU()
-        self.softmax = nn.Softmax(dim=0)
-        # Initialize weights according to the Xavier Glorot formula
-        nn.init.xavier_uniform(self.W1.weight)
-        nn.init.xavier_uniform(self.W2.weight)
-        nn.init.xavier_uniform(self.W3.weight)
-
-    # Forward computation. Backward computation is done implicitly (nn.Module already has an implementation of
-    # it that you shouldn't need to override)
-    def forward(self, x):
-        out = self.W3(self.g(self.W1(x)))
-        #out = self.W3(self.g2(out))
-        return self.softmax(out)
+        return self.softmax(self.W(self.g(self.V(x))))
 
 
 # Form the input to the neural network. In general this may be a complex function that synthesizes multiple pieces

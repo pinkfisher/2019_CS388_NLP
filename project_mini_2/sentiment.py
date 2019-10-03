@@ -12,8 +12,9 @@ def _parse_args():
     :return: the parsed args bundle
     """
     parser = argparse.ArgumentParser(description='trainer.py')
-    parser.add_argument('--model', type=str, default='FF', help='model to run (FF or FANCY)')
+    parser.add_argument('--model', type=str, default='FANCY', help='model to run (FF or FANCY)')
     parser.add_argument('--word_vecs_path', type=str, default='data/glove.6B.50d-relativized.txt', help='path to word vectors file')
+    parser.add_argument('--word_vecs_dim', type=int, default=300, help='dimention of word vector embeddings')
     parser.add_argument('--train_path', type=str, default='data/train.txt', help='path to train set (you should not need to modify)')
     parser.add_argument('--dev_path', type=str, default='data/dev.txt', help='path to dev set (you should not need to modify)')
     parser.add_argument('--blind_test_path', type=str, default='data/test-blind.txt', help='path to blind test set (you should not need to modify)')
@@ -26,7 +27,11 @@ if __name__ == '__main__':
     args = _parse_args()
     print(args)
     # Use either 50-dim or 300-dim vectors
-    word_vectors = read_word_embeddings(args.word_vecs_path)
+    #word_vectors = read_word_embeddings(args.word_vecs_path)
+    if args.word_vecs_dim == 50:
+        word_vectors = read_word_embeddings('data/glove.6B.50d-relativized.txt')
+    elif args.word_vecs_dim == 300:
+        word_vectors = read_word_embeddings('data/glove.6B.300d-relativized.txt')
 
     # Load train, dev, and test exs
     train_exs = read_and_index_sentiment_examples(args.train_path, word_vectors.word_indexer)

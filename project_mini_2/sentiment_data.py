@@ -119,6 +119,11 @@ class WordEmbeddings:
         else:
             return self.vectors[self.word_indexer.index_of("UNK")]
 
+    def get_embedding_from_index(self, idx):
+        if idx != -1:
+            return self.vectors[idx]
+        else:
+            return self.vectors[self.word_indexer.index_of("UNK")]
 
 def read_word_embeddings(embeddings_file: str) -> WordEmbeddings:
     """
@@ -181,9 +186,14 @@ if __name__ == '__main__':
     # The counter is just to see what the counts of missed words are so we can evaluate our tokenization (whether
     # it's mismatched with the word vector vocabulary)
     word_counter = Counter()
-    read_and_index_sentiment_examples("data/train.txt", word_indexer, add_to_indexer=True, word_counter=word_counter)
+    examples = read_and_index_sentiment_examples("data/train.txt", word_indexer, add_to_indexer=True, word_counter=word_counter)
     read_and_index_sentiment_examples("data/dev.txt", word_indexer, add_to_indexer=True, word_counter=word_counter)
     read_and_index_sentiment_examples("data/test.txt", word_indexer, add_to_indexer=True, word_counter=word_counter)
     # Uncomment these to relativize vectors to the dataset
-    # relativize("data/glove.6B/glove.6B.50d.txt", "data/glove.6B.50d-relativized3.txt", word_indexer, word_counter)
-    # relativize("data/glove.6B/glove.6B.300d.txt", "data/glove.6B.300d-relativized3.txt", word_indexer, word_counter)
+    #relativize("data/glove.6B/glove.6B.50d.txt", "data/glove.6B.50d-relativized3.txt", word_indexer, word_counter)
+    #relativize("data/glove.6B/glove.6B.300d.txt", "data/glove.6B.300d-relativized3.txt", word_indexer, word_counter)
+
+    #for e in examples:
+    #    print(e)
+
+    read_word_embeddings("data/glove.6B.50d-relativized.txt")
