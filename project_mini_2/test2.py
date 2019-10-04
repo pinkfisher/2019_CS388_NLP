@@ -26,8 +26,10 @@ test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
                                           shuffle=False)
 
 class LSTMModel(nn.Module):
-    def __init__(self, input_dim, hidden_dim, layer_dim, output_dim):
+    def __init__(self, input_dim, hidden_dim, layer_dim, output_dim, bidirectional=False):
         super(LSTMModel, self).__init__()
+        self.bidirectional = bidirectional
+
         # Hidden dimensions
         self.hidden_dim = hidden_dim
 
@@ -37,17 +39,24 @@ class LSTMModel(nn.Module):
         # Building your LSTM
         # batch_first=True causes input/output tensors to be of shape
         # (batch_dim, seq_dim, feature_dim)
-        self.lstm = nn.LSTM(input_dim, hidden_dim, layer_dim, batch_first=True)
+        self.lstm = nn.LSTM(input_dim, hidden_dim, layer_dim, batch_first=True, bidirectional=self.bidirectional)
 
         # Readout layer
-        self.fc = nn.Linear(hidden_dim, output_dim)
+        if bidirectional:
+            self.fc = nn.Linear(hidden_dim*2, output_dim)
+        else:
+            self.fc = nn.Linear(hidden_dim, output_dim)
 
     def forward(self, x):
+        num_layer = self.layer_dim
+        if self.bidirectional:
+            num_layer *= 2
+
         # Initialize hidden state with zeros
-        h0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).requires_grad_()
+        h0 = torch.zeros(num_layer, x.size(0), self.hidden_dim).requires_grad_()
 
         # Initialize cell state
-        c0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).requires_grad_()
+        c0 = torch.zeros(num_layer, x.size(0), self.hidden_dim).requires_grad_()
 
         # 28 time steps
         # We need to detach as we are doing truncated backpropagation through time (BPTT)
@@ -66,7 +75,7 @@ hidden_dim = 100
 layer_dim = 1
 output_dim = 10
 
-model = LSTMModel(input_dim, hidden_dim, layer_dim, output_dim)
+model = LSTMModel(input_dim, hidden_dim, layer_dim, output_dim, bidirectional=True)
 criterion = nn.CrossEntropyLoss()
 
 learning_rate = 0.1

@@ -52,7 +52,6 @@ class FFNN(nn.Module):
         return train_correct
 
 
-
 def form_input(sentence, word_vectors: WordEmbeddings, average=True):
     if average:
         sum_embedding = 0
@@ -178,9 +177,10 @@ def prepare_dataset_for_RNN(train_exs: List[SentimentExample], word_vectors, pad
         x = form_input(train_mat[idx], word_vectors, average=False)
         y = train_labels_arr[idx]
         y = torch.from_numpy(np.asarray(y, dtype=np.int64))
-        train_data.append((x, y))
+        train_data.append(((x, train_seq_lens[idx]), y))
     print("number of 1s: {}".format(np.sum(train_labels_arr)))
     return train_data
+
 
 class LSTMModel(nn.Module):
     def __init__(self, input_dim, hidden_dim, layer_dim, output_dim, bidirectional=False):
@@ -205,34 +205,44 @@ class LSTMModel(nn.Module):
             self.fc = nn.Linear(hidden_dim, output_dim)
 
     def forward(self, x):
+        x, x_length = x
+        num_data = x.size(0)
+        x = x.float()
+        x_length, perm_idx = x_length.sort(0, descending=True)
+        x = x[perm_idx]
+        x = nn.utils.rnn.pack_padded_sequence(x, x_length, batch_first=True)
+
         num_layer = self.layer_dim
         if self.bidirectional:
             num_layer *= 2
 
         # Initialize hidden state with zeros
-        h0 = torch.zeros(num_layer, x.size(0), self.hidden_dim).requires_grad_()
+        h0 = torch.zeros(num_layer, num_data, self.hidden_dim).requires_grad_()
 
         # Initialize cell state
-        c0 = torch.zeros(num_layer, x.size(0), self.hidden_dim).requires_grad_()
+        c0 = torch.zeros(num_layer, num_data, self.hidden_dim).requires_grad_()
 
         # 28 time steps
         # We need to detach as we are doing truncated backpropagation through time (BPTT)
         # If we don't, we'll backprop all the way to the start even after going through another batch
-        out, (hn, cn) = self.lstm(x, (h0.detach(), c0.detach()))
+        packed_output, (hn, cn) = self.lstm(x, (h0.detach(), c0.detach()))
+
+        output, _ = nn.utils.rnn.pad_packed_sequence(packed_output)
 
         # Index hidden state of last time step
         # out.size() --> 100, 28, 100
         # out[:, -1, :] --> 100, 100 --> just want last time step hidden states!
-        out = self.fc(out[:, -1, :])
-        # out.size() --> 100, 10
-        return out
+        #output = self.fc(output[:, -1, :])
+
+        hidden = torch.cat((hn[-2,:,:], hn[-1,:,:]), dim=1)  # hidden = [batch size, hid dim * num directions]
+        return self.fc(hidden)
 
     def evaluate(self, data_loader):
         correct = 0
         total = 0
 
         for x, y in data_loader:
-            outputs = self.forward(x.float())
+            outputs = self.forward(x)
             _, predicted = torch.max(outputs.data, 1)
             total += y.size(0)
             correct += (predicted == y).sum()
@@ -240,13 +250,15 @@ class LSTMModel(nn.Module):
         accuracy = 100 * correct / total
         return accuracy
 
+
 # Analogous to train_ffnn, but trains your fancier model.
 def train_evaluate_fancy(train_exs: List[SentimentExample], dev_exs: List[SentimentExample], test_exs: List[SentimentExample], word_vectors: WordEmbeddings) -> List[SentimentExample]:
     embedding_size = word_vectors.get_embedding_length()
     num_classes = 2
-    hidden_size = 64
-    batch_size = 30
+    hidden_size = 256
+    batch_size = 10
     num_hidden_layer = 1
+    learning_rate = 0.1
 
     train_data = prepare_dataset_for_RNN(train_exs, word_vectors, num_data=0)
     dev_data = prepare_dataset_for_RNN(dev_exs, word_vectors)
@@ -263,19 +275,21 @@ def train_evaluate_fancy(train_exs: List[SentimentExample], dev_exs: List[Sentim
     num_epochs = 50
     model = LSTMModel(embedding_size, hidden_size, num_hidden_layer, num_classes, bidirectional=True)
     model = model.float()
-    optimizer = optim.Adam(model.parameters(), lr=0.1)
+    #optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
 
     criterion = nn.CrossEntropyLoss()
 
     iter = 0
     for epoch in range(num_epochs):
         for i, (x, y) in enumerate(train_loader):
+
             # Clear gradients w.r.t. parameters
             optimizer.zero_grad()
 
             # Forward pass to get output/logits
             # outputs.size() --> 100, 10
-            outputs = model(x.float())
+            outputs = model(x)
 
             # Calculate Loss: softmax --> cross entropy loss
             loss = criterion(outputs, y)
@@ -303,9 +317,10 @@ def train_evaluate_fancy(train_exs: List[SentimentExample], dev_exs: List[Sentim
     predictions = []
     for idx in range(0, len(test_data)):
         x, y = test_data[idx]
+        x, _ = x
         x = x.unsqueeze(0) # change to [1, seq_len, embedding_size]
         exs = test_exs[idx]
-        outputs = model(x.float())
+        outputs = model(x)
         _, predicted = torch.max(outputs.data, 1)
         predictions.append(SentimentExample(exs.indexed_words, predicted[0].item()))
     return predictions
