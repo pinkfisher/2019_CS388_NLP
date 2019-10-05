@@ -7,6 +7,8 @@ import torch.nn as nn
 from torch import optim
 import numpy as np
 import random
+import time
+
 
 def pad_to_length(np_arr, length):
     """
@@ -19,6 +21,21 @@ def pad_to_length(np_arr, length):
     result = np.zeros(length)
     result[0:np_arr.shape[0]] = np_arr
     return result
+
+
+def epoch_time(start_time, end_time):
+    elapsed_time = end_time - start_time
+    elapsed_mins = int(elapsed_time / 60)
+    elapsed_secs = int(elapsed_time - (elapsed_mins * 60))
+    return elapsed_mins, elapsed_secs
+
+
+def get_accuracy(preds, y):
+    _, rounded_preds = torch.max(torch.sigmoid(preds), 1)
+    correct = (rounded_preds == y).float()  # convert into float for division
+    acc = correct.sum() / len(correct)
+    return acc
+
 
 class FFNN(nn.Module):
     def __init__(self, inp, hid, out):
@@ -121,7 +138,6 @@ def train_evaluate_ffnn(train_exs: List[SentimentExample], dev_exs: List[Sentime
     num_epochs = 20
     num_data = len(train_data)
     ffnn = FFNN(embedding_size, hidden_size, num_classes)
-    #criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(ffnn.parameters(), lr=0.1)
 
     for epoch in range(0, num_epochs):
@@ -135,7 +151,6 @@ def train_evaluate_ffnn(train_exs: List[SentimentExample], dev_exs: List[Sentime
             probs = ffnn.forward(x)
             # Can also use built-in NLLLoss as a shortcut here (takes log probabilities) but we're being explicit here
             loss = torch.neg(torch.log(probs)).dot(y)
-            #loss = criterion(probs, y)
             total_loss += loss
             loss.backward()
             optimizer.step()
@@ -155,7 +170,21 @@ def train_evaluate_ffnn(train_exs: List[SentimentExample], dev_exs: List[Sentime
         predictions.append(SentimentExample(exs.indexed_words, torch.argmax(probs).item()))
     return predictions
 
+
+"""
+    RNN Model for sentiment analysis
+"""
+
+
 def prepare_dataset_for_RNN(train_exs: List[SentimentExample], word_vectors, pad_size=60, num_data=None):
+    """
+
+    :param train_exs:
+    :param word_vectors:
+    :param pad_size:
+    :param num_data:
+    :return: [(sentence(embedded), sentence_length), label]
+    """
     # 59 is the max sentence length in the corpus, so let's set this to 60
     seq_max_len = pad_size
     # To get you started off, we'll pad the training input to 60 words to make it a square matrix.
@@ -178,7 +207,7 @@ def prepare_dataset_for_RNN(train_exs: List[SentimentExample], word_vectors, pad
         y = train_labels_arr[idx]
         y = torch.from_numpy(np.asarray(y, dtype=np.int64))
         train_data.append(((x, train_seq_lens[idx]), y))
-    print("number of 1s: {}".format(np.sum(train_labels_arr)))
+    #print("number of 1s: {}".format(np.sum(train_labels_arr)))
     return train_data
 
 
@@ -196,7 +225,9 @@ class LSTMModel(nn.Module):
         # Building your LSTM
         # batch_first=True causes input/output tensors to be of shape
         # (batch_dim, seq_dim, feature_dim)
-        self.lstm = nn.LSTM(input_dim, hidden_dim, layer_dim, batch_first=True, bidirectional=self.bidirectional)
+        self.lstm = nn.LSTM(input_dim, hidden_dim, layer_dim,
+                            batch_first=True, bidirectional=self.bidirectional,
+                            dropout=0.5)
 
         # Readout layer
         if bidirectional:
@@ -204,51 +235,66 @@ class LSTMModel(nn.Module):
         else:
             self.fc = nn.Linear(hidden_dim, output_dim)
 
-    def forward(self, x):
-        x, x_length = x
-        num_data = x.size(0)
+        self.dropout = nn.Dropout(0.5)
+
+    def forward(self, data):
+        x, x_length = data
+
         x = x.float()
+
+        x = self.dropout(x)
+
+        # Sort and pack the input
         x_length, perm_idx = x_length.sort(0, descending=True)
         x = x[perm_idx]
         x = nn.utils.rnn.pack_padded_sequence(x, x_length, batch_first=True)
 
+        # Double the number of layer if using bidirectional LSTM
         num_layer = self.layer_dim
         if self.bidirectional:
             num_layer *= 2
 
-        # Initialize hidden state with zeros
-        h0 = torch.zeros(num_layer, num_data, self.hidden_dim).requires_grad_()
+        packed_output, (hn, cn) = self.lstm(x)
 
-        # Initialize cell state
-        c0 = torch.zeros(num_layer, num_data, self.hidden_dim).requires_grad_()
+        output, _ = nn.utils.rnn.pad_packed_sequence(packed_output, batch_first=True)
 
-        # 28 time steps
-        # We need to detach as we are doing truncated backpropagation through time (BPTT)
-        # If we don't, we'll backprop all the way to the start even after going through another batch
-        packed_output, (hn, cn) = self.lstm(x, (h0.detach(), c0.detach()))
-
-        output, _ = nn.utils.rnn.pad_packed_sequence(packed_output)
-
-        # Index hidden state of last time step
-        # out.size() --> 100, 28, 100
-        # out[:, -1, :] --> 100, 100 --> just want last time step hidden states!
-        #output = self.fc(output[:, -1, :])
-
-        hidden = torch.cat((hn[-2,:,:], hn[-1,:,:]), dim=1)  # hidden = [batch size, hid dim * num directions]
+        # hidden = [batch size, hid dim * num directions]
+        hidden = torch.cat((hn[-2,:,:], hn[-1,:,:]), dim=1)
+        hidden = self.dropout(hidden)
         return self.fc(hidden)
 
-    def evaluate(self, data_loader):
-        correct = 0
-        total = 0
+    def evaluate(self, iterator, criterion):
+        epoch_loss = 0
+        epoch_acc = 0
 
-        for x, y in data_loader:
+        self.eval()
+
+        with torch.no_grad():
+            for (x, y) in iterator:
+
+                predictions = self(x).squeeze(1)
+
+                loss = criterion(predictions, y)
+
+                acc = get_accuracy(predictions, y)
+
+                epoch_loss += loss.item()
+                epoch_acc += acc.item()
+
+        return epoch_loss / len(iterator), epoch_acc / len(iterator)
+
+    def predict(self, test_exs: List[SentimentExample], word_vectors):
+        test_data = prepare_dataset_for_RNN(test_exs, word_vectors)
+        test_loader = torch.utils.data.DataLoader(dataset=test_data,
+                                                  batch_size=1,
+                                                  shuffle=False)
+        predictions = []
+        for i, (x, y) in enumerate(test_loader):
+            exs = test_exs[i]
             outputs = self.forward(x)
-            _, predicted = torch.max(outputs.data, 1)
-            total += y.size(0)
-            correct += (predicted == y).sum()
-
-        accuracy = 100 * correct / total
-        return accuracy
+            _, predicted = torch.max(torch.round(torch.sigmoid(outputs)), 1)
+            predictions.append(SentimentExample(exs.indexed_words, predicted[0].item()))
+        return predictions
 
 
 # Analogous to train_ffnn, but trains your fancier model.
@@ -256,13 +302,12 @@ def train_evaluate_fancy(train_exs: List[SentimentExample], dev_exs: List[Sentim
     embedding_size = word_vectors.get_embedding_length()
     num_classes = 2
     hidden_size = 256
-    batch_size = 10
-    num_hidden_layer = 1
-    learning_rate = 0.1
+    batch_size = 32
+    num_hidden_layer = 2
+    learning_rate = 0.01
 
     train_data = prepare_dataset_for_RNN(train_exs, word_vectors, num_data=0)
     dev_data = prepare_dataset_for_RNN(dev_exs, word_vectors)
-    test_data = prepare_dataset_for_RNN(test_exs, word_vectors)
 
     train_loader = torch.utils.data.DataLoader(dataset=train_data,
                                                batch_size=batch_size,
@@ -272,17 +317,17 @@ def train_evaluate_fancy(train_exs: List[SentimentExample], dev_exs: List[Sentim
                                               batch_size=batch_size,
                                               shuffle=False)
 
-    num_epochs = 50
+    num_epochs = 20
     model = LSTMModel(embedding_size, hidden_size, num_hidden_layer, num_classes, bidirectional=True)
     model = model.float()
-    #optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
 
     criterion = nn.CrossEntropyLoss()
 
-    iter = 0
+    best_dev_loss = float('inf')
     for epoch in range(num_epochs):
-        for i, (x, y) in enumerate(train_loader):
+        start_time = time.time()
+        for (x, y) in train_loader:
 
             # Clear gradients w.r.t. parameters
             optimizer.zero_grad()
@@ -300,27 +345,22 @@ def train_evaluate_fancy(train_exs: List[SentimentExample], dev_exs: List[Sentim
             # Updating parameters
             optimizer.step()
 
-            iter += 1
+        end_time = time.time()
+        epoch_mins, epoch_secs = epoch_time(start_time, end_time)
 
         # evaluate for each epoch
-        train_accuracy = model.evaluate(train_loader)
-        dev_accuracy = model.evaluate(dev_loader)
-        print('Epoch: {}, Iteration: {}. Loss: {}. Train accuracy: {}, Dev accuracy {}.'
-              .format(epoch, iter, loss.item(), train_accuracy, dev_accuracy))
+        train_loss, train_acc = model.evaluate(train_loader, criterion)
+        dev_loss, dev_acc = model.evaluate(dev_loader, criterion)
 
-    train_accuracy = model.evaluate(train_loader)
-    dev_accuracy = model.evaluate(dev_loader)
-    print('Final result: Train accuracy: {}, Dev accuracy {}.'
-          .format(train_accuracy, dev_accuracy))
+        print(f'Epoch: {epoch+1:02} | Epoch Time: {epoch_mins}m {epoch_secs}s')
+        print(f'\tTrain Loss: {train_loss:.3f} | Train Acc: {train_acc*100:.2f}%')
+        print(f'\t Val. Loss: {dev_loss:.3f} |  Val. Acc: {dev_acc*100:.2f}%')
 
-    # Make prediction
-    predictions = []
-    for idx in range(0, len(test_data)):
-        x, y = test_data[idx]
-        x, _ = x
-        x = x.unsqueeze(0) # change to [1, seq_len, embedding_size]
-        exs = test_exs[idx]
-        outputs = model(x)
-        _, predicted = torch.max(outputs.data, 1)
-        predictions.append(SentimentExample(exs.indexed_words, predicted[0].item()))
-    return predictions
+        if dev_loss < best_dev_loss:
+            best_dev_loss = dev_loss
+            test_exs_predicted = model.predict(test_exs, word_vectors)
+
+            write_sentiment_examples(test_exs_predicted, 'test-blind.output.txt', word_vectors.word_indexer)
+            print("======== Finish writing output ========")
+
+    return test_exs_predicted

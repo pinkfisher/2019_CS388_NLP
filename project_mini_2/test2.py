@@ -98,6 +98,10 @@ for epoch in range(num_epochs):
         # outputs.size() --> 100, 10
         outputs = model(images)
 
+        print(labels)
+        print(outputs)
+        print(xx)
+
         # Calculate Loss: softmax --> cross entropy loss
         loss = criterion(outputs, labels)
 
