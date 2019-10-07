@@ -4,10 +4,9 @@ import torch
 import torch.nn as nn
 import numpy as np
 import time
-import torch.nn.functional as F
 
 """
-    CNN Model for sentiment analysis
+    RNN Model for sentiment analysis
 """
 
 
@@ -24,6 +23,20 @@ def pad_to_length(np_arr, length):
     return result
 
 
+def epoch_time(start_time, end_time):
+    elapsed_time = end_time - start_time
+    elapsed_mins = int(elapsed_time / 60)
+    elapsed_secs = int(elapsed_time - (elapsed_mins * 60))
+    return elapsed_mins, elapsed_secs
+
+
+def get_accuracy(preds, y):
+    _, rounded_preds = torch.max(torch.sigmoid(preds), 1)
+    correct = (rounded_preds == y).float()  # convert into float for division
+    acc = correct.sum() / len(correct)
+    return acc
+
+
 def form_input(sentence, word_vectors: WordEmbeddings, average=True):
     if average:
         sum_embedding = 0
@@ -37,11 +50,22 @@ def form_input(sentence, word_vectors: WordEmbeddings, average=True):
         return torch.stack(embeddings)
 
 
-def prepare_dataset(train_exs: List[SentimentExample], word_vectors, pad_size=60, num_data=None):
+def prepare_dataset_for_RNN(train_exs: List[SentimentExample], word_vectors, pad_size=60, num_data=None):
+    """
+
+    :param train_exs:
+    :param word_vectors:
+    :param pad_size:
+    :param num_data:
+    :return: [(sentence(embedded), sentence_length), label]
+    """
     # 59 is the max sentence length in the corpus, so let's set this to 60
     seq_max_len = pad_size
     # To get you started off, we'll pad the training input to 60 words to make it a square matrix.
-    train_mat = [pad_to_length(np.array(ex.indexed_words), seq_max_len) for ex in train_exs]
+    train_mat = np.asarray([pad_to_length(np.array(ex.indexed_words), seq_max_len) for ex in train_exs])
+
+    # Also store the sequence lengths -- this could be useful for training LSTMs
+    train_seq_lens = np.array([len(ex.indexed_words) for ex in train_exs])
 
     # Labels
     train_labels_arr = np.array([ex.label for ex in train_exs])
@@ -52,102 +76,81 @@ def prepare_dataset(train_exs: List[SentimentExample], word_vectors, pad_size=60
         train_labels_arr = train_labels_arr[:num_data]
 
     train_data = []
-    for idx in range(len(train_mat)):
+    for idx in range(train_mat.shape[0]):
         x = form_input(train_mat[idx], word_vectors, average=False)
         y = train_labels_arr[idx]
         y = torch.from_numpy(np.asarray(y, dtype=np.int64))
-        train_data.append((x, y))
-    print("number of 1s: {}".format(np.sum(train_labels_arr)))
+        train_data.append(((x, train_seq_lens[idx]), y))
+    #print("number of 1s: {}".format(np.sum(train_labels_arr)))
     return train_data
 
 
-def epoch_time(start_time, end_time):
-    elapsed_time = end_time - start_time
-    elapsed_mins = int(elapsed_time / 60)
-    elapsed_secs = int(elapsed_time - (elapsed_mins * 60))
-    return elapsed_mins, elapsed_secs
+class LSTMModel(nn.Module):
+    def __init__(self, input_dim, hidden_dim, layer_dim, output_dim, bidirectional=False):
+        super(LSTMModel, self).__init__()
+        self.bidirectional = bidirectional
 
+        # Hidden dimensions
+        self.hidden_dim = hidden_dim
 
-class CNNModel(nn.Module):
-    def __init__(self, embedding_size, n_filters, filter_sizes, output_dim,
-                 dropout):
-        super().__init__()
+        # Number of hidden layers
+        self.layer_dim = layer_dim
 
-        self.conv_0 = nn.Conv2d(in_channels=1,
-                                out_channels=n_filters,
-                                kernel_size=(filter_sizes[0], embedding_size))
+        # Building your LSTM
+        # batch_first=True causes input/output tensors to be of shape
+        # (batch_dim, seq_dim, feature_dim)
+        self.lstm = nn.LSTM(input_dim, hidden_dim, layer_dim,
+                            batch_first=True, bidirectional=self.bidirectional,
+                            dropout=0.5)
 
-        self.conv_1 = nn.Conv2d(in_channels=1,
-                                out_channels=n_filters,
-                                kernel_size=(filter_sizes[1], embedding_size))
+        # Readout layer
+        if bidirectional:
+            self.fc = nn.Linear(hidden_dim*2, output_dim)
+        else:
+            self.fc = nn.Linear(hidden_dim, output_dim)
 
-        self.conv_2 = nn.Conv2d(in_channels=1,
-                                out_channels=n_filters,
-                                kernel_size=(filter_sizes[2], embedding_size))
+        self.dropout = nn.Dropout(0.5)
 
-        self.fc = nn.Linear(len(filter_sizes) * n_filters, output_dim)
+    def forward(self, data):
+        x, x_length = data
 
-        self.dropout = nn.Dropout(dropout)
+        x = x.float()
 
-    def forward(self, text):
-        # text = [sent len, batch size]
+        x = self.dropout(x)
 
-        #text = text.permute(1, 0)
+        # Sort and pack the input
+        x_length, perm_idx = x_length.sort(0, descending=True)
+        x = x[perm_idx]
+        x = nn.utils.rnn.pack_padded_sequence(x, x_length, batch_first=True)
 
-        # text = [batch size, sent len]
+        # Double the number of layer if using bidirectional LSTM
+        num_layer = self.layer_dim
+        if self.bidirectional:
+            num_layer *= 2
 
-        #embedded = self.embedding(text)
+        packed_output, (hn, cn) = self.lstm(x)
 
-        # embedded = [batch size, sent len, emb dim]
+        output, _ = nn.utils.rnn.pad_packed_sequence(packed_output, batch_first=True)
 
-        text = text.float()
-        embedded = text.unsqueeze(1)
-
-        # embedded = [batch size, 1, sent len, emb dim]
-
-        conved_0 = F.relu(self.conv_0(embedded).squeeze(3))
-        conved_1 = F.relu(self.conv_1(embedded).squeeze(3))
-        conved_2 = F.relu(self.conv_2(embedded).squeeze(3))
-
-        # conved_n = [batch size, n_filters, sent len - filter_sizes[n] + 1]
-
-        pooled_0 = F.max_pool1d(conved_0, conved_0.shape[2]).squeeze(2)
-        pooled_1 = F.max_pool1d(conved_1, conved_1.shape[2]).squeeze(2)
-        pooled_2 = F.max_pool1d(conved_2, conved_2.shape[2]).squeeze(2)
-
-        # pooled_n = [batch size, n_filters]
-
-        cat = self.dropout(torch.cat((pooled_0, pooled_1, pooled_2), dim=1))
-
-        # cat = [batch size, n_filters * len(filter_sizes)]
-
-        return self.fc(cat)
-
-    def get_accuracy(self, preds, y):
-        """
-        Returns accuracy per batch, i.e. if you get 8/10 right, this returns 0.8, NOT 8
-        """
-
-        _, rounded_preds = torch.max(torch.sigmoid(preds), 1)
-        correct = (rounded_preds == y).float()  # convert into float for division
-        acc = correct.sum() / len(correct)
-        return acc
+        # hidden = [batch size, hid dim * num directions]
+        hidden = torch.cat((hn[-2,:,:], hn[-1,:,:]), dim=1)
+        hidden = self.dropout(hidden)
+        return self.fc(hidden)
 
     def evaluate(self, iterator, criterion):
         epoch_loss = 0
         epoch_acc = 0
 
-        # Sets the module in evaluation mode
         self.eval()
 
-        # Disable gradient calculation
         with torch.no_grad():
             for (x, y) in iterator:
+
                 predictions = self(x).squeeze(1)
 
                 loss = criterion(predictions, y)
 
-                acc = self.get_accuracy(predictions, y)
+                acc = get_accuracy(predictions, y)
 
                 epoch_loss += loss.item()
                 epoch_acc += acc.item()
@@ -155,7 +158,7 @@ class CNNModel(nn.Module):
         return epoch_loss / len(iterator), epoch_acc / len(iterator)
 
     def predict(self, test_exs: List[SentimentExample], word_vectors):
-        test_data = prepare_dataset(test_exs, word_vectors)
+        test_data = prepare_dataset_for_RNN(test_exs, word_vectors)
         test_loader = torch.utils.data.DataLoader(dataset=test_data,
                                                   batch_size=1,
                                                   shuffle=False)
@@ -167,18 +170,18 @@ class CNNModel(nn.Module):
             predictions.append(SentimentExample(exs.indexed_words, predicted[0].item()))
         return predictions
 
+
 # Analogous to train_ffnn, but trains your fancier model.
-def train_evaluate_CNN(train_exs: List[SentimentExample], dev_exs: List[SentimentExample], test_exs: List[SentimentExample], word_vectors: WordEmbeddings) -> List[SentimentExample]:
+def train_evaluate_fancy(train_exs: List[SentimentExample], dev_exs: List[SentimentExample], test_exs: List[SentimentExample], word_vectors: WordEmbeddings) -> List[SentimentExample]:
     embedding_size = word_vectors.get_embedding_length()
     num_classes = 2
+    hidden_size = 256
     batch_size = 32
-    learning_rate = 0.1
-    n_filters = 100
-    filter_size = [3, 4, 5]
-    dropout = 0.5
+    num_hidden_layer = 2
+    learning_rate = 0.01
 
-    train_data = prepare_dataset(train_exs, word_vectors, num_data=0)
-    dev_data = prepare_dataset(dev_exs, word_vectors)
+    train_data = prepare_dataset_for_RNN(train_exs, word_vectors, num_data=0)
+    dev_data = prepare_dataset_for_RNN(dev_exs, word_vectors)
 
     train_loader = torch.utils.data.DataLoader(dataset=train_data,
                                                batch_size=batch_size,
@@ -189,9 +192,8 @@ def train_evaluate_CNN(train_exs: List[SentimentExample], dev_exs: List[Sentimen
                                               shuffle=False)
 
     num_epochs = 20
-    model = CNNModel(embedding_size, n_filters, filter_size, num_classes, dropout)
+    model = LSTMModel(embedding_size, hidden_size, num_hidden_layer, num_classes, bidirectional=True)
     model = model.float()
-    #optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
 
     criterion = nn.CrossEntropyLoss()
@@ -199,7 +201,7 @@ def train_evaluate_CNN(train_exs: List[SentimentExample], dev_exs: List[Sentimen
     best_dev_loss = float('inf')
     for epoch in range(num_epochs):
         start_time = time.time()
-        for i, (x, y) in enumerate(train_loader):
+        for (x, y) in train_loader:
 
             # Clear gradients w.r.t. parameters
             optimizer.zero_grad()
@@ -207,10 +209,6 @@ def train_evaluate_CNN(train_exs: List[SentimentExample], dev_exs: List[Sentimen
             # Forward pass to get output/logits
             # outputs.size() --> 100, 10
             outputs = model(x)
-
-            print(outputs)
-            print(y)
-            print(aa)
 
             # Calculate Loss: softmax --> cross entropy loss
             loss = criterion(outputs, y)
@@ -240,4 +238,3 @@ def train_evaluate_CNN(train_exs: List[SentimentExample], dev_exs: List[Sentimen
             print("======== Finish writing output ========")
 
     return test_exs_predicted
-
