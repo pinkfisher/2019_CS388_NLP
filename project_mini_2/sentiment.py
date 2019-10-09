@@ -13,7 +13,7 @@ def _parse_args():
     :return: the parsed args bundle
     """
     parser = argparse.ArgumentParser(description='trainer.py')
-    parser.add_argument('--model', type=str, default='FF', help='model to run (FF or FANCY or CNN)')
+    parser.add_argument('--model', type=str, default='CNN', help='model to run (FF or FANCY or CNN)')
     parser.add_argument('--word_vecs_path', type=str, default='data/glove.6B.50d-relativized.txt', help='path to word vectors file')
     parser.add_argument('--word_vecs_dim', type=int, default=300, help='dimention of word vector embeddings')
     parser.add_argument('--train_path', type=str, default='data/train.txt', help='path to train set (you should not need to modify)')
@@ -41,7 +41,7 @@ if __name__ == '__main__':
     print(repr(len(train_exs)) + " / " + repr(len(dev_exs)) + " / " + repr(len(test_exs)) + " train/dev/test examples")
 
     if args.model == "FF":
-        test_exs_predicted = train_evaluate_ffnn(train_exs, dev_exs, test_exs, word_vectors)
+        test_exs_predicted = train_evaluate_ffnn(train_exs, dev_exs, test_exs, word_vectors, number_layer=1)
         write_sentiment_examples(test_exs_predicted, args.test_output_path, word_vectors.word_indexer)
     elif args.model == "FANCY":
         test_exs_predicted = train_evaluate_fancy(train_exs, dev_exs, test_exs, word_vectors)

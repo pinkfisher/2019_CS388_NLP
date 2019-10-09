@@ -199,6 +199,7 @@ def train_evaluate_fancy(train_exs: List[SentimentExample], dev_exs: List[Sentim
     criterion = nn.CrossEntropyLoss()
 
     best_dev_loss = float('inf')
+    best_dev_acc = float('inf')
     for epoch in range(num_epochs):
         start_time = time.time()
         for (x, y) in train_loader:
@@ -230,8 +231,8 @@ def train_evaluate_fancy(train_exs: List[SentimentExample], dev_exs: List[Sentim
         print(f'\tTrain Loss: {train_loss:.3f} | Train Acc: {train_acc*100:.2f}%')
         print(f'\t Val. Loss: {dev_loss:.3f} |  Val. Acc: {dev_acc*100:.2f}%')
 
-        if dev_loss < best_dev_loss:
-            best_dev_loss = dev_loss
+        if dev_acc > best_dev_acc:
+            best_dev_acc = dev_acc
             test_exs_predicted = model.predict(test_exs, word_vectors)
 
             write_sentiment_examples(test_exs_predicted, 'test-blind.output.txt', word_vectors.word_indexer)

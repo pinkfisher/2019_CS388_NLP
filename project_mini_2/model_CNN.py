@@ -105,9 +105,16 @@ class CNNModel(nn.Module):
 
         # embedded = [batch size, 1, sent len, emb dim]
 
-        conved_0 = F.relu(self.conv_0(embedded).squeeze(3))
-        conved_1 = F.relu(self.conv_1(embedded).squeeze(3))
-        conved_2 = F.relu(self.conv_2(embedded).squeeze(3))
+        activation = "ReLu"
+
+        if activation == "ReLu":
+            f = nn.ReLU()
+        elif activation == "Tanh":
+            f = nn.Tanh()
+
+        conved_0 = f(self.conv_0(embedded).squeeze(3))
+        conved_1 = f(self.conv_1(embedded).squeeze(3))
+        conved_2 = f(self.conv_2(embedded).squeeze(3))
 
         # conved_n = [batch size, n_filters, sent len - filter_sizes[n] + 1]
 
@@ -174,7 +181,12 @@ def train_evaluate_CNN(train_exs: List[SentimentExample], dev_exs: List[Sentimen
     batch_size = 32
     learning_rate = 0.1
     n_filters = 100
-    filter_size = [3, 4, 5]
+    #n_filters = 200
+    #n_filters = 300
+    #filter_size = [3, 4, 5]
+    filter_size = [2, 3, 4]
+    #filter_size = [4, 5, 6]
+    #filter_size = [3, 3, 3]
     dropout = 0.5
 
     train_data = prepare_dataset(train_exs, word_vectors, num_data=0)
@@ -191,12 +203,14 @@ def train_evaluate_CNN(train_exs: List[SentimentExample], dev_exs: List[Sentimen
     num_epochs = 20
     model = CNNModel(embedding_size, n_filters, filter_size, num_classes, dropout)
     model = model.float()
-    #optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
+    #optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    # optimizer = torch.optim.Adadelta(model.parameters())
+    # optimizer = torch.optim.Adagrad(model.parameters())
 
     criterion = nn.CrossEntropyLoss()
 
-    best_dev_loss = float('inf')
+    best_dev_acc = float('-inf')
     for epoch in range(num_epochs):
         start_time = time.time()
         for i, (x, y) in enumerate(train_loader):
@@ -207,10 +221,6 @@ def train_evaluate_CNN(train_exs: List[SentimentExample], dev_exs: List[Sentimen
             # Forward pass to get output/logits
             # outputs.size() --> 100, 10
             outputs = model(x)
-
-            print(outputs)
-            print(y)
-            print(aa)
 
             # Calculate Loss: softmax --> cross entropy loss
             loss = criterion(outputs, y)
@@ -232,8 +242,8 @@ def train_evaluate_CNN(train_exs: List[SentimentExample], dev_exs: List[Sentimen
         print(f'\tTrain Loss: {train_loss:.3f} | Train Acc: {train_acc*100:.2f}%')
         print(f'\t Val. Loss: {dev_loss:.3f} |  Val. Acc: {dev_acc*100:.2f}%')
 
-        if dev_loss < best_dev_loss:
-            best_dev_loss = dev_loss
+        if dev_acc > best_dev_acc:
+            best_dev_acc = dev_acc
             test_exs_predicted = model.predict(test_exs, word_vectors)
 
             write_sentiment_examples(test_exs_predicted, 'test-blind.output.txt', word_vectors.word_indexer)

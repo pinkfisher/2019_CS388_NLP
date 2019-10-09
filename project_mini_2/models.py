@@ -4,7 +4,6 @@ from sentiment_data import *
 from typing import List
 import torch
 import torch.nn as nn
-from torch import optim
 import numpy as np
 import random
 import time
@@ -78,22 +77,50 @@ def prepare_dataset(train_exs: List[SentimentExample], word_vectors, pad_size=60
 
 
 class FFNN(nn.Module):
-    def __init__(self, inp, hid, out):
+    def __init__(self, inp, hid, out, num_layer=1, activation="Tanh"):
         super(FFNN, self).__init__()
+
+        self.num_layer = num_layer
+
         self.V = nn.Linear(inp, hid)
         self.g = nn.Tanh()
-        #self.g = nn.ReLU()
         self.W = nn.Linear(hid, out)
         #self.softmax = nn.Softmax(dim=0)
         # Initialize weights according to the Xavier Glorot formula
         nn.init.xavier_uniform(self.V.weight)
         nn.init.xavier_uniform(self.W.weight)
 
+        if num_layer == 0:
+            self.V0 = nn.Linear(inp, out)
+
+        if num_layer == 2:
+            self.W = nn.Linear(hid, hid)
+            self.g1 = nn.Tanh()
+            self.W1 = nn.Linear(hid, out)
+
+        if activation == "ReLU":
+            self.g = nn.ReLU()
+
+        if activation == "LogSigmoid":
+            self.g = nn.LogSigmoid()
+
+        if activation == "RReLU":
+            self.g = nn.RReLU()
+
+        if activation == "Softplus":
+            self.g = nn.Softplus()
+
     # Forward computation. Backward computation is done implicitly (nn.Module already has an implementation of
     # it that you shouldn't need to override)
     def forward(self, x):
         #return self.softmax(self.W(self.g(self.V(x))))
-        return self.W(self.g(self.V(x)))
+        if self.num_layer == 0:
+            return self.V0(x)
+        if self.num_layer == 1:
+            return self.W(self.g(self.V(x)))
+        if self.num_layer == 2:
+            return self.W1(self.g1(self.W(self.g(self.V(x)))))
+
 
     def evaluate(self, iterator, criterion):
         epoch_loss = 0
@@ -130,8 +157,10 @@ class FFNN(nn.Module):
 
 # , using dev_exs for development and returning
 # predictions on the *blind* test_exs (all test_exs have label 0 as a dummy placeholder value).
-def train_evaluate_ffnn(train_exs: List[SentimentExample], dev_exs: List[SentimentExample], test_exs: List[SentimentExample],
-                        word_vectors: WordEmbeddings) -> List[SentimentExample]:
+def train_evaluate_ffnn(train_exs: List[SentimentExample], dev_exs: List[SentimentExample],
+                        test_exs: List[SentimentExample],
+                        word_vectors: WordEmbeddings,
+                        number_layer=1) -> List[SentimentExample]:
     """
     Train a feedforward neural network on the given training examples, using dev_exs for development, and returns
     predictions on the *blind* test examples passed in. Returned predictions should be SentimentExample objects with
@@ -150,14 +179,16 @@ def train_evaluate_ffnn(train_exs: List[SentimentExample], dev_exs: List[Sentime
 
     train_data = prepare_dataset(train_exs, word_vectors)
     dev_data = prepare_dataset(dev_exs, word_vectors)
-    test_data = prepare_dataset(test_exs, word_vectors)
 
 
     num_epochs = 20
     num_data = len(train_data)
-    ffnn = FFNN(embedding_size, hidden_size, num_classes)
-    #optimizer = optim.Adam(ffnn.parameters(), lr=0.1)
-    optimizer = torch.optim.SGD(ffnn.parameters(), lr=0.1)
+    ffnn = FFNN(embedding_size, hidden_size, num_classes, num_layer=number_layer)
+    #optimizer = torch.optim.Adam(ffnn.parameters(), lr=0.1)
+    #optimizer = torch.optim.SGD(ffnn.parameters(), lr=0.1)
+    #optimizer = torch.optim.Adadelta(ffnn.parameters())
+    optimizer = torch.optim.Adagrad(ffnn.parameters())
+
     criterion = nn.CrossEntropyLoss()
 
     for epoch in range(0, num_epochs):
