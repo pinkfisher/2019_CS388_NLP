@@ -93,7 +93,7 @@ class Seq2SeqSemanticParser(object):
         n_sentences = all_test_input_data.shape[0]
 
         for i in range(n_sentences):
-            input_tensor = torch.from_numpy(all_test_input_data[i, :]).unsqueeze(0)
+            input_tensor = torch.from_numpy(all_test_input_data[i, :]).unsqueeze(1)
             pred_words = decode_one_sentence(input_tensor, self.encoder, self.decoder, self.output_indexer)
 
             test_derivs.append([Derivation(test_data[i], 1.0, pred_words)])
@@ -104,16 +104,16 @@ def decode_one_sentence(input_tensor, encoder, decoder, output_indexer, max_leng
     with torch.no_grad():
         encoder_hidden = encoder.initHidden()
 
-        SOS_token = 1
-        EOS_token = 2
+        SOS_token = output_indexer.index_of("<SOS>")
+        EOS_token = output_indexer.index_of("<EOS>")
 
-        input_length = input_tensor.size(1)
+        input_length = input_tensor.size(0)
 
         encoder_outputs = torch.zeros(max_length, encoder.hidden_size)
 
         for ei in range(input_length):
             encoder_output, encoder_hidden = encoder(
-                input_tensor[:, ei], encoder_hidden)
+                input_tensor[ei], encoder_hidden)
             encoder_outputs[ei] = encoder_output[0, 0]
 
         decoder_input = torch.tensor([[SOS_token]])
@@ -125,14 +125,13 @@ def decode_one_sentence(input_tensor, encoder, decoder, output_indexer, max_leng
         for di in range(max_length):
             decoder_output, decoder_hidden = decoder(
                 decoder_input, decoder_hidden)
-            topv, topi = decoder_output.data.topk(1)
-            if topi.item() == EOS_token:
+            topv, topi = decoder_output.topk(1)
+            decoder_input = topi.squeeze().detach()
+            if decoder_input.item() == EOS_token:
                 decoded_words.append('<EOS>')
                 break
             else:
-                decoded_words.append(output_indexer.get_object(topi.item()))
-
-            decoder_input = topi.squeeze().detach()
+                decoded_words.append(output_indexer.get_object(decoder_input.item()))
 
         return decoded_words
 
@@ -233,8 +232,10 @@ def train_model_encdec(train_data: List[Example], test_data: List[Example], inpu
 
     enc_input_size = len(input_indexer)
     enc_hidden_size = dec_hidden_size = 256
-    dec_output_size = len(output_indexer)
-    n_epochs = 10
+    #test
+    #dec_output_size = len(output_indexer)
+    dec_output_size = len(input_indexer)
+    n_epochs = args.epochs
     n_sentences = all_train_input_data.shape[0]
 
     encoder = EncoderRNN(enc_input_size, enc_hidden_size)
@@ -245,10 +246,17 @@ def train_model_encdec(train_data: List[Example], test_data: List[Example], inpu
     criterion = nn.NLLLoss()
 
     for epoch in range(1, n_epochs+1):
-        for i in range(n_sentences):
-            input_tensor = torch.from_numpy(all_train_input_data[i, :]).unsqueeze(0)
-            target_tensor = torch.from_numpy(all_train_output_data[i, :]).unsqueeze(0)
-            loss = train_model(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion)
+
+        ex_indices = [i for i in range(n_sentences)]
+        random.shuffle(ex_indices)
+
+        for i in ex_indices:
+            input_tensor = torch.from_numpy(all_train_input_data[i, :]).unsqueeze(1)
+            # test
+            #target_tensor = torch.from_numpy(all_train_output_data[i, :]).unsqueeze(0)
+            target_tensor = input_tensor
+            loss = train_model(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, decoder_optimizer,
+                               criterion, output_indexer)
             print_loss_total += loss
             plot_loss_total += loss
 
@@ -257,28 +265,30 @@ def train_model_encdec(train_data: List[Example], test_data: List[Example], inpu
                                      epoch, epoch / n_epochs * 100, print_loss_avg))
 
         print_loss_total = 0
-    return Seq2SeqSemanticParser(encoder, decoder, output_indexer)
+
+    # test
+    #return Seq2SeqSemanticParser(encoder, decoder, output_indexer)
+    return Seq2SeqSemanticParser(encoder, decoder, input_indexer)
 
 def train_model(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, decoder_optimizer,
-          criterion, max_length=65, teacher_forcing_ratio=0.5):
+          criterion, output_indexer, max_length=65, teacher_forcing_ratio=0.5):
     encoder_hidden = encoder.initHidden()
 
     encoder_optimizer.zero_grad()
     decoder_optimizer.zero_grad()
 
-    SOS_token = 1
-    EOS_token = 2
+    SOS_token = output_indexer.index_of("<SOS>")
+    EOS_token = output_indexer.index_of("<EOS>")
 
-    input_length = input_tensor.size(1)
-    target_length = target_tensor.size(1)
-
+    input_length = input_tensor.size(0)
+    target_length = target_tensor.size(0)
     encoder_outputs = torch.zeros(max_length, encoder.hidden_size)
 
     loss = 0
 
     for ei in range(input_length):
         encoder_output, encoder_hidden = encoder(
-            input_tensor[:, ei], encoder_hidden)
+            input_tensor[ei], encoder_hidden)
         encoder_outputs[ei] = encoder_output[0, 0]
 
     decoder_input = torch.tensor([[SOS_token]])
@@ -292,8 +302,8 @@ def train_model(input_tensor, target_tensor, encoder, decoder, encoder_optimizer
         for di in range(target_length):
             decoder_output, decoder_hidden = decoder(
                 decoder_input, decoder_hidden)
-            loss += criterion(decoder_output, target_tensor[:, di])
-            decoder_input = target_tensor[:, di]  # Teacher forcing
+            loss += criterion(decoder_output, target_tensor[di])
+            decoder_input = target_tensor[di]  # Teacher forcing
 
     else:
         # Without teacher forcing: use its own predictions as the next input
@@ -303,7 +313,7 @@ def train_model(input_tensor, target_tensor, encoder, decoder, encoder_optimizer
             topv, topi = decoder_output.topk(1)
             decoder_input = topi.squeeze().detach()  # detach from history as input
 
-            loss += criterion(decoder_output, target_tensor[:, di])
+            loss += criterion(decoder_output, target_tensor[di])
             if decoder_input.item() == EOS_token:
                 break
 
@@ -366,6 +376,7 @@ if __name__ == '__main__':
     # Load the training and test data
 
     train, dev, test = load_datasets(args.train_path, args.dev_path, args.test_path, domain=args.domain)
+    train = train[:3]
     train_data_indexed, dev_data_indexed, test_data_indexed, input_indexer, output_indexer = index_datasets(train, dev, test, args.decoder_len_limit)
     print("%i train exs, %i dev exs, %i input types, %i output types" % (len(train_data_indexed), len(dev_data_indexed), len(input_indexer), len(output_indexer)))
     print("Input indexer: %s" % input_indexer)
@@ -379,7 +390,8 @@ if __name__ == '__main__':
     else:
         decoder = train_model_encdec(train_data_indexed, dev_data_indexed, input_indexer, output_indexer, args)
     print("=======FINAL EVALUATION ON BLIND TEST=======")
-    evaluate(dev_data_indexed, decoder)
-    evaluate(test_data_indexed, decoder, print_output=False, outfile="geo_test_output.tsv")
+    #evaluate(dev_data_indexed, decoder)
+    evaluate(train_data_indexed, decoder, example_freq=1)
+    #evaluate(test_data_indexed, decoder, print_output=False, outfile="geo_test_output.tsv")
 
 

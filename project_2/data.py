@@ -118,7 +118,10 @@ def index_data(data, input_indexer: Indexer, output_indexer: Indexer, example_le
     for (x, y) in data:
         x_tok = tokenize(x)
         y_tok = tokenize(y)[0:example_len_limit]
-        data_indexed.append(Example(x, x_tok, index(x_tok, input_indexer), y, y_tok,
+        # test
+        #data_indexed.append(Example(x, x_tok, index(x_tok, input_indexer), y, y_tok,
+        #                                  index(y_tok, output_indexer) + [output_indexer.index_of(EOS_SYMBOL)]))
+        data_indexed.append(Example(x, x_tok, index(x_tok, input_indexer) + [input_indexer.index_of(EOS_SYMBOL)], y, y_tok,
                                           index(y_tok, output_indexer) + [output_indexer.index_of(EOS_SYMBOL)]))
     return data_indexed
 
@@ -145,6 +148,10 @@ def index_datasets(train_data, dev_data, test_data, example_len_limit, unk_thres
     # Reserve 0 for the pad symbol for convenience
     input_indexer.add_and_get_index(PAD_SYMBOL)
     input_indexer.add_and_get_index(UNK_SYMBOL)
+    # test
+    input_indexer.add_and_get_index(SOS_SYMBOL)
+    input_indexer.add_and_get_index(EOS_SYMBOL)
+
     output_indexer.add_and_get_index(PAD_SYMBOL)
     output_indexer.add_and_get_index(SOS_SYMBOL)
     output_indexer.add_and_get_index(EOS_SYMBOL)
