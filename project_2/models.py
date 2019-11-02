@@ -11,6 +11,7 @@ import numpy as np
 # for your network.
 ###################################################################################################################
 
+
 class EmbeddingLayer(nn.Module):
     """
     Embedding layer that has a lookup table of symbols that is [full_dict_size x input_dim]. Includes dropout.
@@ -80,7 +81,7 @@ class RNNEncoder(nn.Module):
     def sent_lens_to_mask(self, lens, max_length):
         return torch.from_numpy(np.asarray([[1 if j < lens.data[i].item() else 0 for j in range(0, max_length)] for i in range(0, lens.shape[0])]))
 
-    def forward(self, embedded_words, input_lens):
+    def forward(self, embedded_words, input_lens, hidden):
         """
         Runs the forward pass of the LSTM
         :param embedded_words: [batch size x sent len x input dim] tensor
@@ -114,4 +115,92 @@ class RNNEncoder(nn.Module):
         else:
             h, c = hn[0][0], hn[1][0]
             h_t = (h, c)
-        return (output, context_mask, h_t)
+        return output, context_mask, hn
+
+class RNNDecoder(nn.Module):
+    """
+    One-layer RNN Decoder for batched inputs -- handles multiple sentences at once. To use in non-batched mode, call it
+    with a leading dimension of 1 (i.e., use batch size 1)
+    """
+    def __init__(self, input_size: int, hidden_size: int, output_size: int):
+        """
+        :param input_size: size of word embeddings output by embedding layer
+        :param hidden_size: hidden size for the LSTM
+        :param bidirect: True if bidirectional, false otherwise
+        """
+        super(RNNDecoder, self).__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.output_size = output_size
+        self.rnn = nn.LSTM(input_size, hidden_size, num_layers=1, batch_first=True,
+                               dropout=0.)
+        self.linear = nn.Linear(hidden_size, output_size)
+        self.softmax = nn.LogSoftmax(dim=1)
+        self.init_weight()
+
+    def init_weight(self):
+        """
+        Initializes weight matrices using Xavier initialization
+        :return:
+        """
+        nn.init.xavier_uniform_(self.rnn.weight_hh_l0, gain=1)
+        nn.init.xavier_uniform_(self.rnn.weight_ih_l0, gain=1)
+
+        nn.init.constant_(self.rnn.bias_hh_l0, 0)
+        nn.init.constant_(self.rnn.bias_ih_l0, 0)
+
+    def sent_lens_to_mask(self, lens, max_length):
+        return torch.from_numpy(np.asarray([[1 if j < lens.data[i].item() else 0 for j in range(0, max_length)] for i in range(0, lens.shape[0])]))
+
+    def forward(self, embedded_words, hidden, encoder_outputs):
+        """
+        Runs the forward pass of the LSTM
+        :param embedded_words: [batch size x sent len x input dim] tensor
+        :param input_lens: [batch size]-length vector containing the length of each input sentence
+        :return: output (each word's representation), context_mask (a mask of 0s and 1s
+        reflecting where the model's output should be considered), and h_t, a *tuple* containing
+        the final states h and c from the encoder for each sentence.
+        """
+        output = F.relu(embedded_words)
+        output, hidden = self.rnn(output, hidden)
+        output = self.softmax(self.linear(output))
+        return output, hidden
+
+
+class EncoderRNN(nn.Module):
+    def __init__(self, input_size, hidden_size):
+        super(EncoderRNN, self).__init__()
+        self.hidden_size = hidden_size
+
+        self.embedding = nn.Embedding(input_size, hidden_size)
+        self.gru = nn.GRU(hidden_size, hidden_size)
+
+    def forward(self, input, hidden):
+        embedded = self.embedding(input).view(1, 1, -1)
+        output = embedded
+        output, hidden = self.gru(output, hidden)
+        return output, hidden
+
+    def initHidden(self):
+        return torch.zeros(1, 1, self.hidden_size)
+
+
+class DecoderRNN(nn.Module):
+    def __init__(self, hidden_size, output_size):
+        super(DecoderRNN, self).__init__()
+        self.hidden_size = hidden_size
+
+        self.embedding = nn.Embedding(output_size, hidden_size)
+        self.gru = nn.GRU(hidden_size, hidden_size)
+        self.out = nn.Linear(hidden_size, output_size)
+        self.softmax = nn.LogSoftmax(dim=1)
+
+    def forward(self, input, hidden):
+        output = self.embedding(input).view(1, 1, -1)
+        output = F.relu(output)
+        output, hidden = self.gru(output, hidden)
+        output = self.softmax(self.out(output[0]))
+        return output, hidden
+
+    def initHidden(self):
+        return torch.zeros(1, 1, self.hidden_size, device=device)

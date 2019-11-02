@@ -1,0 +1,22 @@
+main() {
+  Execution directory: /Users/niyixuan/PycharmProjects/CS388_NLP/project_2/state/execs/11.exec
+  DataManager.loadExamples {
+    Reading general {
+      Path: evaluator/domains/dbquery/geoquery/1/geoquery.dlog {
+        Parsing evaluator/domains/dbquery/geoquery/1/geoquery.dlog
+        89 statements
+        Parsing evaluator/domains/dbquery/geoquery/1/../../general/predicates.dlog
+        49 statements
+        Parsing evaluator/domains/dbquery/geoquery/1/geobase.dlog
+        698 statements
+      } [1.2s, cum. 1.2s]
+      Path: evaluator/domains/dbquery/geoquery/1/lexicon.dlog {
+        Parsing evaluator/domains/dbquery/geoquery/1/lexicon.dlog
+        5 statements
+        Parsing evaluator/domains/dbquery/geoquery/1/../../general/lexicon.dlog
+        31 statements
+        Parsing evaluator/domains/dbquery/geoquery/1/lexicon0.dlog
+        5 statements
+      }
+      Path: /var/folders/19/rw908y710gz8njcg2p8cl5s80000gn/T/tmpbohj2bzb.dlog {
+        Parsing /var/folders/19/rw908y710gz8njcg2p8cl5s80000gn/T/tmpbohj2bzb.dlog
