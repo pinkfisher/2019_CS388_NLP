@@ -81,7 +81,7 @@ class RNNEncoder(nn.Module):
     def sent_lens_to_mask(self, lens, max_length):
         return torch.from_numpy(np.asarray([[1 if j < lens.data[i].item() else 0 for j in range(0, max_length)] for i in range(0, lens.shape[0])]))
 
-    def forward(self, embedded_words, input_lens, hidden):
+    def forward(self, embedded_words, input_lens):
         """
         Runs the forward pass of the LSTM
         :param embedded_words: [batch size x sent len x input dim] tensor
@@ -115,59 +115,24 @@ class RNNEncoder(nn.Module):
         else:
             h, c = hn[0][0], hn[1][0]
             h_t = (h, c)
-        return output, context_mask, hn
-
-class EncoderRNN(nn.Module):
-    def __init__(self, input_size, hidden_size):
-        super(EncoderRNN, self).__init__()
-        self.hidden_size = hidden_size
-
-        self.embedding = nn.Embedding(input_size, hidden_size)
-        self.gru = nn.GRU(hidden_size, hidden_size)
-
-    def forward(self, input, hidden):
-        embedded = self.embedding(input).view(1, 1, -1)
-        output = embedded
-        output, hidden = self.gru(output, hidden)
-        return output, hidden
-
-    def initHidden(self):
-        return torch.zeros(1, 1, self.hidden_size)
-
-class EncoderBiRNN(nn.Module):
-    def __init__(self, input_size, hidden_size):
-        super(EncoderBiRNN, self).__init__()
-        self.hidden_size = hidden_size
-
-        self.embedding = nn.Embedding(input_size, hidden_size)
-        self.lstm = nn.GRU(hidden_size, hidden_size)
-
-    def forward(self, input, hidden):
-        embedded = self.embedding(input).view(1, 1, -1)
-        output = embedded
-        output, hidden = self.gru(output, hidden)
-        return output, hidden
-
-    def initHidden(self):
-        return torch.zeros(1, 1, self.hidden_size)
+        return output, context_mask, h_t
 
 
 class DecoderRNN(nn.Module):
-    def __init__(self, hidden_size, output_size):
+    def __init__(self, input_size, hidden_size, output_size):
         super(DecoderRNN, self).__init__()
+        self.input_size = input_size
         self.hidden_size = hidden_size
-
-        self.embedding = nn.Embedding(output_size, hidden_size)
-        self.lstm = nn.GRU(hidden_size, hidden_size)
+        self.embedding = nn.Embedding(input_size, hidden_size)
+        self.rnn = nn.LSTM(hidden_size, hidden_size, num_layers=1, batch_first=True,
+                               dropout=0., bidirectional=False)
         self.out = nn.Linear(hidden_size, output_size)
         self.softmax = nn.LogSoftmax(dim=1)
 
     def forward(self, input, hidden):
-        output = self.embedding(input).view(1, 1, -1)
+        output = self.embedding(input)  # shape=[1, 1, 256]
         output = F.relu(output)
-        output, hidden = self.lstm(output, hidden)
+        output, hidden = self.rnn(output, hidden)
         output = self.softmax(self.out(output[0]))
         return output, hidden
 
-    def initHidden(self):
-        return torch.zeros(1, 1, self.hidden_size)
