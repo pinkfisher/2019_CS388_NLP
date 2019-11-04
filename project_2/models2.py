@@ -117,64 +117,70 @@ class RNNEncoder(nn.Module):
             h_t = (h, c)
         return output, context_mask, h_t
 
+class EncoderRNN(nn.Module):
+    def __init__(self, input_size, hidden_size):
+        super(EncoderRNN, self).__init__()
+        self.hidden_size = hidden_size
 
-class RNNDecoder(nn.Module):
-    def __init__(self, input_size, hidden_size, output_size):
-        super(RNNDecoder, self).__init__()
+        self.embedding = nn.Embedding(input_size, hidden_size)
+        self.lstm = nn.LSTM(hidden_size, hidden_size, batch_first=True, num_layers=1.)
+
+    def forward(self, input, hidden):
+        embedded = self.embedding(input)
+        output = embedded.view(1, 1, -1)
+        output, hidden = self.lstm(output, hidden)
+        return output, hidden
+
+    def initHidden(self):
+        return torch.zeros(1, 1, self.hidden_size), torch.zeros(1, 1, self.hidden_size)
+
+class EncoderBiRNN(nn.Module):
+    def __init__(self, input_size, hidden_size):
+        super(EncoderBiRNN, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.embedding = nn.Embedding(input_size, hidden_size)
-        self.rnn = nn.LSTM(hidden_size, hidden_size, num_layers=1, batch_first=True,
-                               dropout=0., bidirectional=False)
+        self.lstm = nn.LSTM(hidden_size, hidden_size, batch_first=True, bidirectional=True)
+        self.reduce_h_W = nn.Linear(hidden_size * 2, hidden_size, bias=True)
+        self.reduce_c_W = nn.Linear(hidden_size * 2, hidden_size, bias=True)
+
+    def forward(self, input, hidden):
+        embedded = self.embedding(input)
+        output = embedded.view(1, self.input_size, -1)
+        print(output.shape)
+
+        output, hidden = self.lstm(output, hidden)
+
+        h, c = hidden[0], hidden[1]
+        # Grab the representations from forward and backward LSTMs
+        h_, c_ = torch.cat((h[0], h[1]), dim=1), torch.cat((c[0], c[1]), dim=1)
+        # Reduce them by multiplying by a weight matrix so that the hidden size sent to the decoder is the same
+        # as the hidden size in the encoder
+        new_h = self.reduce_h_W(h_)
+        new_c = self.reduce_c_W(c_)
+        h_t = (new_h, new_c)
+
+        print(new_h.shape)
+        print(new_c.shape)
+
+        return output, h_t
+
+    def initHidden(self):
+        return torch.zeros(2, 1, self.hidden_size), torch.zeros(2, 1, self.hidden_size)
+
+class DecoderRNN(nn.Module):
+    def __init__(self, hidden_size, output_size):
+        super(DecoderRNN, self).__init__()
+        self.hidden_size = hidden_size
+
+        self.embedding = nn.Embedding(output_size, hidden_size)
+        self.lstm = nn.LSTM(hidden_size, hidden_size, batch_first=True)
         self.out = nn.Linear(hidden_size, output_size)
         self.softmax = nn.LogSoftmax(dim=1)
 
     def forward(self, input, hidden):
-        output = self.embedding(input)  # shape=[1, 1, 256]
+        output = self.embedding(input).view(1, 1, -1)
         output = F.relu(output)
-        output, hidden = self.rnn(output, hidden)
+        output, hidden = self.lstm(output, hidden)
         output = self.softmax(self.out(output[0]))
         return output, hidden
-
-
-class AttnDecoderRNN(nn.Module):
-    def __init__(self, hidden_size, output_size, max_length, dropout_p=0.1):
-        super(AttnDecoderRNN, self).__init__()
-        self.hidden_size = hidden_size
-        self.output_size = output_size
-        self.dropout_p = dropout_p
-        self.max_length = max_length
-
-        self.embedding = nn.Embedding(self.output_size, self.hidden_size)
-        self.attn = nn.Linear(self.hidden_size * 2, self.max_length)
-        self.attn_combine = nn.Linear(self.hidden_size * 2, self.hidden_size)
-        self.dropout = nn.Dropout(self.dropout_p)
-        self.rnn = nn.LSTM(self.hidden_size, self.hidden_size)
-        self.out = nn.Linear(self.hidden_size, self.output_size)
-
-    def forward(self, input, hidden, encoder_outputs):
-        # encoder_outputs.shape = [30, 256]
-        embedded = self.embedding(input).squeeze(0)
-        embedded = self.dropout(embedded)  # shape = [1, 256]
-        embedded = embedded.unsqueeze(0)  # shape = [1, 1, 256]
-
-        emb_cat_hidden = torch.cat((embedded, hidden[0]), 2)  # shape = [1, 1, 512]
-
-        attn_weights = F.softmax(
-            self.attn(emb_cat_hidden), dim=1)  # shape = [1, 1, 30]
-
-        encoder_outputs = encoder_outputs.unsqueeze(0)  # shape = [1, 30, 256]
-
-        attn_applied = torch.bmm(attn_weights,
-                                 encoder_outputs)  # shape = [1, 1, 256]
-
-        output = torch.cat((embedded, attn_applied), 2)  # shape = [1, 1, 512]
-        output = self.attn_combine(output)  # shape = [1, 1, 256]
-
-        output = F.relu(output)
-        output, hidden = self.rnn(output, hidden)
-
-        output = F.log_softmax(self.out(output[0]), dim=1)
-        return output, hidden, attn_weights
-
-
