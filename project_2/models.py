@@ -118,9 +118,9 @@ class RNNEncoder(nn.Module):
         return output, context_mask, h_t
 
 
-class DecoderRNN(nn.Module):
+class RNNDecoder(nn.Module):
     def __init__(self, input_size, hidden_size, output_size):
-        super(DecoderRNN, self).__init__()
+        super(RNNDecoder, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.embedding = nn.Embedding(input_size, hidden_size)
@@ -135,4 +135,41 @@ class DecoderRNN(nn.Module):
         output, hidden = self.rnn(output, hidden)
         output = self.softmax(self.out(output[0]))
         return output, hidden
+
+
+class AttnDecoderRNN(nn.Module):
+    def __init__(self, hidden_size, output_size, max_length, dropout_p=0.1):
+        super(AttnDecoderRNN, self).__init__()
+        self.hidden_size = hidden_size
+        self.output_size = output_size
+        self.dropout_p = dropout_p
+        self.max_length = max_length
+
+        self.embedding = nn.Embedding(self.output_size, self.hidden_size)
+        self.attn = nn.Linear(self.hidden_size * 2, self.max_length)
+        self.attn_combine = nn.Linear(self.hidden_size * 2, self.hidden_size)
+        self.dropout = nn.Dropout(self.dropout_p)
+        self.rnn = nn.LSTM(self.hidden_size, self.hidden_size)
+        self.out = nn.Linear(self.hidden_size, self.output_size)
+
+    def forward(self, input, hidden, encoder_outputs):
+        embedded = self.embedding(input)
+        embedded = self.dropout(embedded)
+
+        emb_cat_hidden = torch.cat((embedded, hidden[0]), 2).squeeze(0)  # shape= [1, 512]
+
+        attn_weights = F.softmax(
+            self.attn(emb_cat_hidden), dim=1)
+        attn_applied = torch.bmm(attn_weights.unsqueeze(0),
+                                 encoder_outputs.unsqueeze(0))
+
+        output = torch.cat((embedded, attn_applied), 2).squeeze(0)
+        output = self.attn_combine(output).unsqueeze(0)
+
+        output = F.relu(output)
+        output, hidden = self.rnn(output, hidden)
+
+        output = F.log_softmax(self.out(output[0]), dim=1)
+        return output, hidden, attn_weights
+
 
