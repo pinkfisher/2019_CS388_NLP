@@ -61,6 +61,8 @@ class Attn(nn.Module):
     def score(self, hidden, encoder_output):
 
         if self.method == 'dot':
+            hidden = hidden.squeeze(0)
+            encoder_output = encoder_output.squeeze(0)
             energy = hidden.dot(encoder_output)
             return energy
 
@@ -71,8 +73,9 @@ class Attn(nn.Module):
             return energy
 
         elif self.method == 'concat':
-            energy = self.attn(torch.cat((hidden, encoder_output), 1))
-            energy = self.v.dot(energy)
+            energy = self.attn(torch.cat((hidden, encoder_output), 1).squeeze(0))
+            v = self.v.squeeze(0)
+            energy = v.dot(energy)
             return energy
 
 

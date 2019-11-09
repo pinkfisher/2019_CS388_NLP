@@ -1,0 +1,207 @@
+python main.py --epochs 100 --batch_size 2, teacher_forcing=1
+
+==========START TRAINING=========
+/Users/niyixuan/PycharmProjects/CS388_NLP/project_2_1/models.py:59: UserWarning: Implicit dimension choice for softmax has been deprecated. Change the call to include dim=X as an argument.
+  return F.softmax(attn_energies).unsqueeze(1)
+/Users/niyixuan/PycharmProjects/CS388_NLP/venv/lib/python3.6/site-packages/torch/nn/functional.py:1339: UserWarning: nn.functional.tanh is deprecated. Use torch.tanh instead.
+  warnings.warn("nn.functional.tanh is deprecated. Use torch.tanh instead.")
+/Users/niyixuan/PycharmProjects/CS388_NLP/project_2_1/masked_cross_entropy.py:37: UserWarning: Implicit dimension choice for log_softmax has been deprecated. Change the call to include dim=X as an argument.
+  log_probs_flat = functional.log_softmax(logits_flat)
+/Users/niyixuan/PycharmProjects/CS388_NLP/project_2_1/masked_cross_entropy.py:9: UserWarning: torch.range is deprecated in favor of torch.arange and will be removed in 0.5. Note that arange generates values in [start; end), not [start; end].
+  seq_range = torch.range(0, max_len - 1).long()
+main.py:294: UserWarning: torch.nn.utils.clip_grad_norm is now deprecated in favor of torch.nn.utils.clip_grad_norm_.
+  ec = torch.nn.utils.clip_grad_norm(encoder.parameters(), 50.0)
+main.py:295: UserWarning: torch.nn.utils.clip_grad_norm is now deprecated in favor of torch.nn.utils.clip_grad_norm_.
+  dc = torch.nn.utils.clip_grad_norm(decoder.parameters(), 50.0)
+0m 47s (- 78m 8s) (1 1%) 556.0142
+1m 33s (- 76m 20s) (2 2%) 238.9015
+2m 20s (- 75m 39s) (3 3%) 157.3813
+3m 8s (- 75m 20s) (4 4%) 119.3170
+3m 54s (- 74m 20s) (5 5%) 99.1120
+4m 43s (- 73m 55s) (6 6%) 85.9397
+5m 30s (- 73m 11s) (7 7%) 72.9074
+6m 16s (- 72m 8s) (8 8%) 67.6398
+7m 2s (- 71m 14s) (9 9%) 59.8697
+7m 50s (- 70m 30s) (10 10%) 55.2236
+8m 38s (- 69m 52s) (11 11%) 51.0214
+9m 26s (- 69m 13s) (12 12%) 45.3387
+10m 12s (- 68m 16s) (13 13%) 43.1326
+10m 59s (- 67m 30s) (14 14%) 41.1708
+11m 45s (- 66m 36s) (15 15%) 36.9550
+12m 32s (- 65m 53s) (16 16%) 36.8630
+13m 19s (- 65m 1s) (17 17%) 33.0768
+14m 6s (- 64m 18s) (18 18%) 32.7406
+14m 54s (- 63m 34s) (19 19%) 31.8838
+15m 40s (- 62m 43s) (20 20%) 29.8291
+16m 26s (- 61m 50s) (21 21%) 26.8377
+17m 11s (- 60m 58s) (22 22%) 24.6309
+17m 55s (- 60m 0s) (23 23%) 24.7830
+18m 38s (- 59m 1s) (24 24%) 24.2597
+19m 22s (- 58m 7s) (25 25%) 22.9532
+20m 8s (- 57m 20s) (26 26%) 21.7336
+20m 54s (- 56m 31s) (27 27%) 20.6837
+21m 41s (- 55m 45s) (28 28%) 19.5868
+22m 30s (- 55m 6s) (29 28%) 19.9396
+23m 19s (- 54m 25s) (30 30%) 19.2256
+24m 7s (- 53m 41s) (31 31%) 20.0322
+24m 56s (- 53m 0s) (32 32%) 17.2873
+25m 44s (- 52m 16s) (33 33%) 16.4248
+26m 32s (- 51m 31s) (34 34%) 14.2744
+27m 20s (- 50m 46s) (35 35%) 13.9260
+28m 6s (- 49m 58s) (36 36%) 14.6715
+28m 55s (- 49m 15s) (37 37%) 12.6329
+29m 45s (- 48m 33s) (38 38%) 14.0275
+30m 37s (- 47m 54s) (39 39%) 12.3505
+31m 28s (- 47m 12s) (40 40%) 12.1050
+32m 17s (- 46m 28s) (41 41%) 10.2057
+33m 6s (- 45m 42s) (42 42%) 10.7947
+33m 56s (- 44m 58s) (43 43%) 10.8450
+34m 44s (- 44m 13s) (44 44%) 13.0859
+35m 32s (- 43m 26s) (45 45%) 10.9202
+36m 21s (- 42m 40s) (46 46%) 9.9994
+37m 5s (- 41m 50s) (47 47%) 8.0738
+37m 51s (- 41m 0s) (48 48%) 8.4004
+38m 35s (- 40m 9s) (49 49%) 8.6480
+39m 19s (- 39m 19s) (50 50%) 7.0566
+40m 3s (- 38m 29s) (51 51%) 6.0856
+40m 48s (- 37m 39s) (52 52%) 5.9300
+41m 36s (- 36m 54s) (53 53%) 5.3960
+42m 21s (- 36m 4s) (54 54%) 4.6910
+43m 7s (- 35m 16s) (55 55%) 5.3252
+43m 52s (- 34m 28s) (56 56%) 5.1591
+44m 35s (- 33m 38s) (57 56%) 4.5938
+45m 21s (- 32m 50s) (58 57%) 5.9443
+46m 9s (- 32m 4s) (59 59%) 4.7196
+46m 53s (- 31m 15s) (60 60%) 7.1027
+47m 36s (- 30m 26s) (61 61%) 5.6067
+48m 21s (- 29m 38s) (62 62%) 4.2390
+49m 6s (- 28m 50s) (63 63%) 3.5991
+49m 52s (- 28m 3s) (64 64%) 3.2191
+50m 38s (- 27m 15s) (65 65%) 3.1194
+51m 24s (- 26m 28s) (66 66%) 3.5788
+52m 16s (- 25m 44s) (67 67%) 3.1791
+53m 6s (- 24m 59s) (68 68%) 3.0439
+53m 54s (- 24m 13s) (69 69%) 2.2237
+54m 43s (- 23m 27s) (70 70%) 2.3166
+55m 34s (- 22m 41s) (71 71%) 1.7494
+56m 23s (- 21m 55s) (72 72%) 3.1414
+57m 15s (- 21m 10s) (73 73%) 2.9513
+58m 6s (- 20m 25s) (74 74%) 3.0743
+58m 54s (- 19m 38s) (75 75%) 2.7569
+59m 43s (- 18m 51s) (76 76%) 3.4692
+60m 33s (- 18m 5s) (77 77%) 1.9452
+61m 23s (- 17m 18s) (78 78%) 1.7596
+62m 12s (- 16m 32s) (79 79%) 1.4927
+63m 2s (- 15m 45s) (80 80%) 1.5009
+63m 54s (- 14m 59s) (81 81%) 1.0915
+64m 43s (- 14m 12s) (82 82%) 1.0412
+65m 35s (- 13m 26s) (83 83%) 0.9757
+66m 26s (- 12m 39s) (84 84%) 1.3689
+67m 11s (- 11m 51s) (85 85%) 2.0462
+67m 56s (- 11m 3s) (86 86%) 3.3027
+68m 41s (- 10m 15s) (87 87%) 2.2867
+69m 28s (- 9m 28s) (88 88%) 1.8896
+70m 13s (- 8m 40s) (89 89%) 1.2240
+70m 57s (- 7m 53s) (90 90%) 0.8275
+71m 44s (- 7m 5s) (91 91%) 1.4905
+72m 29s (- 6m 18s) (92 92%) 1.1806
+73m 14s (- 5m 30s) (93 93%) 0.6644
+74m 0s (- 4m 43s) (94 94%) 0.9289
+74m 46s (- 3m 56s) (95 95%) 0.7563
+75m 29s (- 3m 8s) (96 96%) 0.7890
+76m 15s (- 2m 21s) (97 97%) 3.3259
+77m 0s (- 1m 34s) (98 98%) 1.5609
+77m 44s (- 0m 47s) (99 99%) 1.7210
+78m 29s (- 0m 0s) (100 100%) 1.0214
+=======TRAIN EVALUATION=======
+Loading JAR files: evaluator.jar
+gold: 0 syntax errors, 0 executor errors
+predicted: 4 syntax errors, 1 executor errors
+Example 49
+  x      = "what is the length of the colorado river in texas ?"
+  y_tok  = "['_answer', '(', 'NV', ',', '(', '_len', '(', 'NV', ',', 'V1', ')', ',', '_const', '(', 'V0', ',', '_riverid', '(', 'colorado', ')', ')', ',', '_river', '(', 'V0', ')', ',', '_loc', '(', 'V0', ',', 'NV', ')', ',', '_const', '(', 'V0', ',', '_stateid', '(', 'texas', ')', ')', ')', ')']"
+  y_pred = "['_answer', '(', 'NV', ',', '(', '_len', '(', 'NV', ',', 'V1', ')', ',', '_const', '(', 'V0', ',', '_riverid', '(', 'colorado', ')', ')', ',', '_river', '(', 'V0', ')', ')', ')']"
+Example 99
+  x      = "how many cities are there in the us ?"
+  y_tok  = "['_answer', '(', 'NV', ',', '_count', '(', 'NV', ',', '(', '_city', '(', 'V0', ')', ',', '_loc', '(', 'V0', ',', 'NV', ')', ',', '_const', '(', 'V0', ',', '_countryid', '(', 'usa', ')', ')', ')', ',', 'V2', ')', ')']"
+  y_pred = "['_answer', '(', 'NV', ',', '_count', '(', 'NV', ',', '(', '_city', '(', 'V0', ')', ',', '_loc', '(', 'V0', ',', 'NV', ')', ',', '_const', '(', 'V0', ',', '_countryid', '(', 'usa', ')', ')', ')', ',', 'V2', ')', ')']"
+Example 149
+  x      = "what state has the most people ?"
+  y_tok  = "['_answer', '(', 'NV', ',', '_largest', '(', 'NV', ',', '(', '_state', '(', 'V1', ')', ',', '_population', '(', 'V1', ',', 'V0', ')', ')', ')', ')']"
+  y_pred = "['_answer', '(', 'NV', ',', '_largest', '(', 'NV', ',', '(', '_state', '(', 'V1', ')', ',', '_population', '(', 'V1', ',', 'V0', ')', ')', ')', ')']"
+Example 199
+  x      = "what is the population of oregon ?"
+  y_tok  = "['_answer', '(', 'NV', ',', '(', '_population', '(', 'NV', ',', 'V1', ')', ',', '_const', '(', 'V0', ',', '_stateid', '(', 'oregon', ')', ')', ')', ')']"
+  y_pred = "['_answer', '(', 'NV', ',', '(', '_population', '(', 'NV', ',', 'V1', ')', ',', '_const', '(', 'V0', ',', '_stateid', '(', 'oregon', ')', ')', ')', ')']"
+Example 249
+  x      = "what is the most populated capital in the usa ?"
+  y_tok  = "['_answer', '(', 'NV', ',', '_largest', '(', 'NV', ',', '(', '_population', '(', 'V1', ',', 'V0', ')', ',', '_capital', '(', 'V1', ')', ',', '_loc', '(', 'V1', ',', 'NV', ')', ',', '_const', '(', 'V0', ',', '_countryid', '(', 'usa', ')', ')', ')', ')', ')']"
+  y_pred = "['_answer', '(', 'NV', ',', '_largest', '(', 'NV', ',', '(', '_population', '(', 'V1', ',', 'V0', ')', ',', '_capital', '(', 'V1', ')', ',', '_loc', '(', 'V1', ',', 'NV', ')', ',', '_const', '(', 'V0', ',', '_countryid', '(', 'usa', ')', ')', ')', ')', ')']"
+Example 299
+  x      = "what is the largest state traversed by the mississippi river ?"
+  y_tok  = "['_answer', '(', 'NV', ',', '_largest', '(', 'V0', ',', '(', '_state', '(', 'V0', ')', ',', '_traverse', '(', 'NV', ',', 'V1', ')', ',', '_const', '(', 'V0', ',', '_riverid', '(', 'mississippi', ')', ')', ')', ')', ')']"
+  y_pred = "['_answer', '(', 'NV', ',', '_largest', '(', 'V0', ',', '(', '_state', '(', 'V0', ')', ',', '_traverse', '(', 'NV', ',', 'V1', ')', ',', '_const', '(', 'V0', ',', '_riverid', '(', 'mississippi', ')', ')', ')', ')', ')']"
+Example 349
+  x      = "what is the smallest state bordering ohio ?"
+  y_tok  = "['_answer', '(', 'NV', ',', '_smallest', '(', 'V0', ',', '(', '_state', '(', 'V0', ')', ',', '_next_to', '(', 'V0', ',', 'NV', ')', ',', '_const', '(', 'V0', ',', '_stateid', '(', 'ohio', ')', ')', ')', ')', ')']"
+  y_pred = "['_answer', '(', 'NV', ',', '_smallest', '(', 'V0', ',', '(', '_state', '(', 'V0', ')', ',', '_next_to', '(', 'V0', ',', 'NV', ')', ',', '_const', '(', 'V0', ',', '_stateid', '(', 'ohio', ')', ')', ')', ')', ')']"
+Example 399
+  x      = "how many people live in california ?"
+  y_tok  = "['_answer', '(', 'NV', ',', '(', '_population', '(', 'NV', ',', 'V1', ')', ',', '_const', '(', 'V0', ',', '_stateid', '(', 'california', ')', ')', ')', ')']"
+  y_pred = "['_answer', '(', 'NV', ',', '(', '_population', '(', 'NV', ',', 'V1', ')', ',', '_const', '(', 'V0', ',', '_stateid', '(', 'california', ')', ')', ')', ')']"
+Example 449
+  x      = "in which state does the highest point in usa exist ?"
+  y_tok  = "['_answer', '(', 'NV', ',', '(', '_loc', '(', 'NV', ',', 'V1', ')', ',', '_state', '(', 'V1', ')', ',', '_highest', '(', 'V0', ',', '(', '_place', '(', 'V0', ')', ',', '_loc', '(', 'V0', ',', 'NV', ')', ',', '_const', '(', 'V0', ',', '_countryid', '(', 'usa', ')', ')', ')', ')', ')', ')']"
+  y_pred = "['_answer', '(', 'NV', ',', '(', '_loc', '(', 'NV', ',', 'V1', ')', ',', '_state', '(', 'V1', ')', ',', '_highest', '(', 'V0', ',', '(', '_place', '(', 'V0', ')', ',', '_loc', '(', 'V0', ',', 'NV', ')', ',', '_const', '(', 'V0', ',', '_countryid', '(', 'usa', ')', ')', ')', ')', ')', ')']"
+Exact logical form matches: 465 / 480 = 0.969
+Token-level accuracy: 15303 / 15498 = 0.987
+Denotation matches: 471 / 480 = 0.981
+=======END OF TRAIN EVALUATION=======
+=======DEV EVALUATION=======
+Loading JAR files: evaluator.jar
+gold: 0 syntax errors, 0 executor errors
+predicted: 5 syntax errors, 3 executor errors
+Example 24
+  x      = "what is the largest city in minnesota by population ?"
+  y_tok  = "['_answer', '(', 'NV', ',', '_largest', '(', 'NV', ',', '(', '_city', '(', 'V1', ')', ',', '_loc', '(', 'V1', ',', 'NV', ')', ',', '_const', '(', 'V0', ',', '_stateid', '(', 'minnesota', ')', ')', ',', '_population', '(', 'V2', ',', 'V1', ')', ')', ')', ')']"
+  y_pred = "['_answer', '(', 'NV', ',', '_largest', '(', 'V0', ',', '(', '_city', '(', 'V0', ')', ',', '_loc', '(', 'V0', ',', 'NV', ')', ',', '_const', '(', 'V0', ',', '_stateid', '(', 'georgia', ')', ')', ')', ')', ')']"
+Example 49
+  x      = "what is the longest river flowing through new york ?"
+  y_tok  = "['_answer', '(', 'NV', ',', '_longest', '(', 'V0', ',', '(', '_river', '(', 'V0', ')', ',', '_traverse', '(', 'V0', ',', 'NV', ')', ',', '_const', '(', 'V0', ',', '_stateid', '(', "'", 'new', 'york', "'", ')', ')', ')', ')', ')']"
+  y_pred = "['_answer', '(', 'NV', ',', '_longest', '(', 'V0', ',', '(', '_river', '(', 'V0', ')', ',', '_loc', '(', 'V0', ',', 'NV', ')', ',', '_const', '(', 'V0', ',', '_stateid', '(', "'", 'new', 'york', "'", ')', ')', ')', ')', ')']"
+Example 74
+  x      = "what is the capital of utah ?"
+  y_tok  = "['_answer', '(', 'NV', ',', '(', '_capital', '(', 'V0', ')', ',', '_loc', '(', 'V0', ',', 'NV', ')', ',', '_const', '(', 'V0', ',', '_stateid', '(', 'utah', ')', ')', ')', ')']"
+  y_pred = "['_answer', '(', 'NV', ',', '(', '_capital', '(', 'V0', ')', ',', '_loc', '(', 'V0', ',', 'NV', ')', ',', '_const', '(', 'V0', ',', '_stateid', '(', 'montana', ')', ')', ')', ')']"
+Example 99
+  x      = "what is the lowest point in california ?"
+  y_tok  = "['_answer', '(', 'NV', ',', '_lowest', '(', 'V0', ',', '(', '_place', '(', 'V0', ')', ',', '_loc', '(', 'V0', ',', 'NV', ')', ',', '_const', '(', 'V0', ',', '_stateid', '(', 'california', ')', ')', ')', ')', ')']"
+  y_pred = "['_answer', '(', 'NV', ',', '_lowest', '(', 'V0', ',', '(', '_place', '(', 'V0', ')', ',', '_loc', '(', 'V0', ',', 'NV', ')', ',', '_const', '(', 'V0', ',', '_stateid', '(', 'california', ')', ')', ')', ')', ')']"
+Exact logical form matches: 51 / 120 = 0.425
+Token-level accuracy: 3206 / 3908 = 0.820
+Denotation matches: 61 / 120 = 0.508
+=======END OF DEV EVALUATION=======
+=======FINAL EVALUATION ON BLIND TEST=======
+Loading JAR files: evaluator.jar
+gold: 0 syntax errors, 0 executor errors
+predicted: 19 syntax errors, 8 executor errors
+Example 49
+  x      = "what state has the most major cities ?"
+  y_tok  = "['_answer', '(', 'NV', ',', '_largest', '(', 'V0', ',', '_state', '(', 'V0', ')', ')', ')']"
+  y_pred = "['_answer', '(', 'NV', ',', '_most', '(', 'V0', ',', 'NV', ',', '(', '_state', '(', 'V1', ')', ',', '_loc', '(', 'V0', ',', 'V1', ')', ',', '_major', '(', 'V0', ')', ',', '_city', '(', 'V0', ')', ')', ')', ')']"
+Example 99
+  x      = "what are the major cities in the usa ?"
+  y_tok  = "['_answer', '(', 'NV', ',', '_largest', '(', 'V0', ',', '_state', '(', 'V0', ')', ')', ')']"
+  y_pred = "['_answer', '(', 'NV', ',', '(', '_major', '(', 'V0', ')', ',', '_city', '(', 'V0', ')', ',', '_loc', '(', 'V0', ',', 'NV', ')', ',', '_const', '(', 'V0', ',', '_countryid', '(', 'usa', ')', ')', ')', ')']"
+Example 149
+  x      = "which state has the lowest point that borders idaho ?"
+  y_tok  = "['_answer', '(', 'NV', ',', '_largest', '(', 'V0', ',', '_state', '(', 'V0', ')', ')', ')']"
+  y_pred = "['_answer', '(', 'NV', ',', '_lowest', '(', 'NV', ',', '(', '_state', '(', 'V1', ')', ',', '_loc', '(', 'V0', ',', 'V1', ')', ',', '_place', '(', 'V0', ')', ')', ')', ')', ')']"
+Example 199
+  x      = "how long is the longest river in california ?"
+  y_tok  = "['_answer', '(', 'NV', ',', '_largest', '(', 'V0', ',', '_state', '(', 'V0', ')', ')', ')']"
+  y_pred = "['_answer', '(', 'NV', ',', '(', '_len', '(', 'NV', ',', 'V1', ')', ',', '_longest', '(', 'V0', ',', '(', '_river', '(', 'V0', ')', ')', ')', ')', ')']"
+Example 249
+  x      = "what state bordering nevada has the largest population ?"
+  y_tok  = "['_answer', '(', 'NV', ',', '_largest', '(', 'V0', ',', '_state', '(', 'V0', ')', ')', ')']"
+  y_pred = "['_answer', '(', 'NV', ',', '_largest', '(', 'NV', ',', '(', '_state', '(', 'V1', ')', ',', '_population', '(', 'V1', ',', 'V0', ')', ')', ')', ')']"

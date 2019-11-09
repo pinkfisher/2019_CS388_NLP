@@ -27,7 +27,8 @@ def _parse_args():
     parser.add_argument('--test_path', type=str, default='data/geo_test.tsv', help='path to blind test data')
     parser.add_argument('--test_output_path', type=str, default='geo_test_output.tsv', help='path to write blind test results')
     parser.add_argument('--domain', type=str, default='geo', help='domain (geo for geoquery)')
-    
+    parser.add_argument('--attn_model', type=str, default='general', help='Attention model to use: general (default), dot, concat')
+
     # Some common arguments for your convenience
     parser.add_argument('--seed', type=int, default=0, help='RNG seed (default = 0)')
     parser.add_argument('--epochs', type=int, default=100, help='num epochs to train for')
@@ -188,7 +189,7 @@ def train_model_encdec(all_train_data: List[Example], test_data: List[Example], 
         output_indexer = input_indexer
 
     # Configuration
-    attn_model = "general"
+    attn_model = args.attn_model
     hidden_size = 100
     n_layers = 2
     dropout = 0.1
@@ -233,7 +234,7 @@ def train_model_encdec(all_train_data: List[Example], test_data: List[Example], 
 
 
 def train_batch(input_batches, input_lengths, target_batches, target_lengths, encoder, decoder, encoder_optimizer,
-          decoder_optimizer, output_max_len, criterion, args):
+          decoder_optimizer, output_max_len, criterion, args, teacher_forcing_ratio=0.5):
 
     SOS_token = output_indexer.index_of("<SOS>")
     EOS_token = output_indexer.index_of("<EOS>")
@@ -253,15 +254,34 @@ def train_batch(input_batches, input_lengths, target_batches, target_lengths, en
     max_target_length = max(target_lengths)
     all_decoder_outputs = Variable(torch.zeros(output_max_len, args.batch_size, decoder.output_size))
 
+    use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
 
-    # Run through decoder one time step at a time
-    for t in range(max_target_length):
-        decoder_output, decoder_hidden, decoder_attn = decoder(
-            decoder_input, decoder_hidden, encoder_outputs
-        )
+    if use_teacher_forcing:
+        # Run through decoder one time step at a time
+        for t in range(max_target_length):
+            decoder_output, decoder_hidden, decoder_attn = decoder(
+                decoder_input, decoder_hidden, encoder_outputs
+            )
 
-        all_decoder_outputs[t] = decoder_output
-        decoder_input = target_batches[t]  # Next input is current target
+            all_decoder_outputs[t] = decoder_output
+            decoder_input = target_batches[t]  # Next input is current target
+
+    else:
+        # Run through decoder
+        n_EOS_tokens = 0
+        for di in range(max_target_length):
+            decoder_output, decoder_hidden, decoder_attn = decoder(
+                decoder_input, decoder_hidden, encoder_outputs
+            )  # decoder_output.shape = [batch_size, output_vocab_size]
+
+            # Choose top word from output
+            topv, topi = decoder_output.data.topk(1)
+            if EOS_token in topi:
+                n_EOS_tokens += 1
+                if n_EOS_tokens == args.batch_size:
+                    break
+            all_decoder_outputs[di] = decoder_output
+            decoder_input = Variable(torch.LongTensor(topi.squeeze(1)))
 
     # Loss calculation and backpropagation
     loss = masked_cross_entropy(
@@ -269,7 +289,6 @@ def train_batch(input_batches, input_lengths, target_batches, target_lengths, en
         target_batches.transpose(0, 1).contiguous(),  # -> batch x seq
         target_lengths
     )
-    #loss = criterion(all_decoder_outputs.transpose(0, 1).contiguous(), target_batches.transpose(0, 1).contiguous())
     loss.backward()
 
     # Clip gradient norms
@@ -389,5 +408,6 @@ if __name__ == '__main__':
 
     if not args.debug:
         print("=======FINAL EVALUATION ON BLIND TEST=======")
+        evaluate(test_data_indexed, decoder, print_output=False, outfile="geo_test_output.tsv")
 
 
