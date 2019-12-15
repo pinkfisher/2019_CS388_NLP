@@ -7,7 +7,7 @@ server.numThreads	4
 data.random	1
 data.trainPaths	
 data.maxSentenceLength	2147483647
-data.generalPaths	evaluator/domains/dbquery/geoquery/1/geoquery.dlog evaluator/domains/dbquery/geoquery/1/lexicon.dlog /var/folders/19/rw908y710gz8njcg2p8cl5s80000gn/T/tmpj3_ueo5y.dlog
+data.generalPaths	evaluator/domains/dbquery/geoquery/1/geoquery.dlog evaluator/domains/dbquery/geoquery/1/lexicon.dlog /var/folders/19/rw908y710gz8njcg2p8cl5s80000gn/T/tmpxb5iz7or.dlog
 data.testPaths	
 data.generalMaxExamples	MAX
 data.trainMaxExamples	2147483647
@@ -22,7 +22,7 @@ parser.cachedPath
 parser.lowercase	true
 log.maxIndLevel	10
 log.msPerLine	0
-log.file	/Users/niyixuan/PycharmProjects/CS388_NLP/project_2/state/execs/9.exec/log
+log.file	/Users/niyixuan/PycharmProjects/CS388_NLP/project_2_1/state/execs/9.exec/log
 log.stdout	true
 log.note	
 log.forcePrint	false
@@ -49,6 +49,10 @@ main.interactive	false
 model.timeout	0
 model.posTagDictPath	
 model.lexToTime	false
+model.forceRightBranching	false
+model.forceParseSyntax	false
+model.autoUpdate	false
+model.useBayesianAveraging	true
 model.allowDelayedExtraction	false
 model.implicit1k	false
 model.implicitk1	false
@@ -68,21 +72,17 @@ model.inParamsPath
 model.outParamsPath	
 model.outBasketsPath	
 model.features	pred pred2 predarg lexpred lexnull
-model.useSyntax	true
 model.pruneEmptyDen	false
+model.useSyntax	true
 model.pruneErrDen	false
 model.pruneInfDen	false
-model.forceRightBranching	false
-model.forceParseSyntax	false
 model.beamSize	100
-model.autoUpdate	false
-model.useBayesianAveraging	true
 model.dlogOptions	lexMode=0
 model.verbose	2
 exec.create	true
 exec.monitor	true
 exec.execDir	
-exec.execPoolDir	/Users/niyixuan/PycharmProjects/CS388_NLP/project_2/state/execs
+exec.execPoolDir	/Users/niyixuan/PycharmProjects/CS388_NLP/project_2_1/state/execs
 exec.actualExecPoolDir	
 exec.overwriteExecDir	false
 exec.useStandardExecPoolDirStrategy	true
@@ -102,13 +102,13 @@ exec.thunkJavaOpts
 exec.thunkReqMemory	1024
 exec.dontCatchExceptions	false
 int.random	1
+int.maxCost	100000
 int.displayMaxSetSize	1
 int.displayTypes	false
 int.displayDens	false
 int.displaySpans	false
 int.prettyMaxSetSize	10
 int.crashOnTypeError	false
-int.maxCost	100000
 int.roundNumDigits	2147483647
 int.verbose	0
 learn.backtrack.stepSizeDecrFactor	0.9

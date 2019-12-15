@@ -1,13 +1,13 @@
 server.port	8400
-server.basePath	www
 server.propertiesPath	
+server.basePath	www
 server.logPath	
 server.collapseDetails	false
 server.numThreads	4
 data.random	1
 data.trainPaths	
 data.maxSentenceLength	2147483647
-data.generalPaths	evaluator/domains/dbquery/geoquery/1/geoquery.dlog evaluator/domains/dbquery/geoquery/1/lexicon.dlog /var/folders/19/rw908y710gz8njcg2p8cl5s80000gn/T/tmpbohj2bzb.dlog
+data.generalPaths	evaluator/domains/dbquery/geoquery/1/geoquery.dlog evaluator/domains/dbquery/geoquery/1/lexicon.dlog /var/folders/19/rw908y710gz8njcg2p8cl5s80000gn/T/tmp80lz2j83.dlog
 data.testPaths	
 data.generalMaxExamples	MAX
 data.trainMaxExamples	2147483647
@@ -22,7 +22,7 @@ parser.cachedPath
 parser.lowercase	true
 log.maxIndLevel	10
 log.msPerLine	0
-log.file	/Users/niyixuan/PycharmProjects/CS388_NLP/project_2/state/execs/11.exec/log
+log.file	/Users/niyixuan/PycharmProjects/CS388_NLP/project_2_1/state/execs/11.exec/log
 log.stdout	true
 log.note	
 log.forcePrint	false
@@ -47,20 +47,18 @@ main.launchParser	false
 main.startServer	false
 main.interactive	false
 model.timeout	0
-model.posTagDictPath	
-model.lexToTime	false
+model.features	pred pred2 predarg lexpred lexnull
 model.pruneEmptyDen	false
+model.useSyntax	true
 model.pruneErrDen	false
 model.pruneInfDen	false
 model.forceRightBranching	false
 model.forceParseSyntax	false
 model.beamSize	100
-model.features	pred pred2 predarg lexpred lexnull
-model.useSyntax	true
 model.autoUpdate	false
+model.implicit1k	false
 model.useBayesianAveraging	true
 model.allowDelayedExtraction	false
-model.implicit1k	false
 model.implicitk1	false
 model.allowNonProjectivity	false
 model.allowTroll	true
@@ -77,12 +75,14 @@ model.normPhrasePrefixLen	2147483647
 model.inParamsPath	
 model.outParamsPath	
 model.outBasketsPath	
-model.verbose	2
 model.dlogOptions	lexMode=0
+model.posTagDictPath	
+model.lexToTime	false
+model.verbose	2
 exec.create	true
 exec.monitor	true
 exec.execDir	
-exec.execPoolDir	/Users/niyixuan/PycharmProjects/CS388_NLP/project_2/state/execs
+exec.execPoolDir	/Users/niyixuan/PycharmProjects/CS388_NLP/project_2_1/state/execs
 exec.actualExecPoolDir	
 exec.overwriteExecDir	false
 exec.useStandardExecPoolDirStrategy	true
@@ -102,14 +102,14 @@ exec.thunkJavaOpts
 exec.thunkReqMemory	1024
 exec.dontCatchExceptions	false
 int.random	1
-int.displayMaxSetSize	1
+int.displaySpans	false
 int.displayTypes	false
 int.displayDens	false
-int.displaySpans	false
 int.prettyMaxSetSize	10
 int.crashOnTypeError	false
 int.maxCost	100000
 int.roundNumDigits	2147483647
+int.displayMaxSetSize	1
 int.verbose	0
 learn.backtrack.stepSizeDecrFactor	0.9
 learn.backtrack.stepSizeIncrFactor	1.3

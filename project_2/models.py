@@ -2,179 +2,131 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import random
-from torch.autograd import Variable as Var
+from torch.autograd import Variable
 
 import numpy as np
 
-###################################################################################################################
-# You do not have to use any of the classes in this file, but they're meant to give you a starting implementation.
-# for your network.
-###################################################################################################################
+class EncoderRNN(nn.Module):
+    def __init__(self, input_size, hidden_size, n_layers=1, dropout=0.1):
+        super(EncoderRNN, self).__init__()
 
-
-class EmbeddingLayer(nn.Module):
-    """
-    Embedding layer that has a lookup table of symbols that is [full_dict_size x input_dim]. Includes dropout.
-    Works for both non-batched and batched inputs
-    """
-    def __init__(self, input_dim: int, full_dict_size: int, embedding_dropout_rate: float):
-        """
-        :param input_dim: dimensionality of the word vectors
-        :param full_dict_size: number of words in the vocabulary
-        :param embedding_dropout_rate: dropout rate to apply
-        """
-        super(EmbeddingLayer, self).__init__()
-        self.dropout = nn.Dropout(embedding_dropout_rate)
-        self.word_embedding = nn.Embedding(full_dict_size, input_dim)
-
-    def forward(self, input):
-        """
-        :param input: either a non-batched input [sent len x voc size] or a batched input
-        [batch size x sent len x voc size]
-        :return: embedded form of the input words (last coordinate replaced by input_dim)
-        """
-        embedded_words = self.word_embedding(input)
-        final_embeddings = self.dropout(embedded_words)
-        return final_embeddings
-
-
-class RNNEncoder(nn.Module):
-    """
-    One-layer RNN encoder for batched inputs -- handles multiple sentences at once. To use in non-batched mode, call it
-    with a leading dimension of 1 (i.e., use batch size 1)
-    """
-    def __init__(self, input_size: int, hidden_size: int, bidirect: bool):
-        """
-        :param input_size: size of word embeddings output by embedding layer
-        :param hidden_size: hidden size for the LSTM
-        :param bidirect: True if bidirectional, false otherwise
-        """
-        super(RNNEncoder, self).__init__()
-        self.bidirect = bidirect
         self.input_size = input_size
         self.hidden_size = hidden_size
-        self.reduce_h_W = nn.Linear(hidden_size * 2, hidden_size, bias=True)
-        self.reduce_c_W = nn.Linear(hidden_size * 2, hidden_size, bias=True)
-        self.rnn = nn.LSTM(input_size, hidden_size, num_layers=1, batch_first=True,
-                               dropout=0., bidirectional=self.bidirect)
-        self.init_weight()
+        self.n_layers = n_layers
+        self.dropout = dropout
 
-    def init_weight(self):
-        """
-        Initializes weight matrices using Xavier initialization
-        :return:
-        """
-        nn.init.xavier_uniform_(self.rnn.weight_hh_l0, gain=1)
-        nn.init.xavier_uniform_(self.rnn.weight_ih_l0, gain=1)
-        if self.bidirect:
-            nn.init.xavier_uniform_(self.rnn.weight_hh_l0_reverse, gain=1)
-            nn.init.xavier_uniform_(self.rnn.weight_ih_l0_reverse, gain=1)
-        nn.init.constant_(self.rnn.bias_hh_l0, 0)
-        nn.init.constant_(self.rnn.bias_ih_l0, 0)
-        if self.bidirect:
-            nn.init.constant_(self.rnn.bias_hh_l0_reverse, 0)
-            nn.init.constant_(self.rnn.bias_ih_l0_reverse, 0)
-
-    def get_output_size(self):
-        return self.hidden_size * 2 if self.bidirect else self.hidden_size
-
-    def sent_lens_to_mask(self, lens, max_length):
-        return torch.from_numpy(np.asarray([[1 if j < lens.data[i].item() else 0 for j in range(0, max_length)] for i in range(0, lens.shape[0])]))
-
-    def forward(self, embedded_words, input_lens):
-        """
-        Runs the forward pass of the LSTM
-        :param embedded_words: [batch size x sent len x input dim] tensor
-        :param input_lens: [batch size]-length vector containing the length of each input sentence
-        :return: output (each word's representation), context_mask (a mask of 0s and 1s
-        reflecting where the model's output should be considered), and h_t, a *tuple* containing
-        the final states h and c from the encoder for each sentence.
-        """
-        # Takes the embedded sentences, "packs" them into an efficient Pytorch-internal representation
-        packed_embedding = nn.utils.rnn.pack_padded_sequence(embedded_words, input_lens, batch_first=True)
-        # Runs the RNN over each sequence. Returns output at each position as well as the last vectors of the RNN
-        # state for each sentence (first/last vectors for bidirectional)
-        output, hn = self.rnn(packed_embedding)
-        # Unpacks the Pytorch representation into normal tensors
-        output, sent_lens = nn.utils.rnn.pad_packed_sequence(output)
-        max_length = input_lens.data[0].item()
-        context_mask = self.sent_lens_to_mask(sent_lens, max_length)
-
-        # Grabs the encoded representations out of hn, which is a weird tuple thing.
-        # Note: if you want multiple LSTM layers, you'll need to change this to consult the penultimate layer
-        # or gather representations from all layers.
-        if self.bidirect:
-            h, c = hn[0], hn[1]
-            # Grab the representations from forward and backward LSTMs
-            h_, c_ = torch.cat((h[0], h[1]), dim=1), torch.cat((c[0], c[1]), dim=1)
-            # Reduce them by multiplying by a weight matrix so that the hidden size sent to the decoder is the same
-            # as the hidden size in the encoder
-            new_h = self.reduce_h_W(h_)
-            new_c = self.reduce_c_W(c_)
-            h_t = (new_h, new_c)
-        else:
-            h, c = hn[0][0], hn[1][0]
-            h_t = (h, c)
-        return output, context_mask, h_t
-
-
-class RNNDecoder(nn.Module):
-    def __init__(self, input_size, hidden_size, output_size):
-        super(RNNDecoder, self).__init__()
-        self.input_size = input_size
-        self.hidden_size = hidden_size
         self.embedding = nn.Embedding(input_size, hidden_size)
-        self.rnn = nn.LSTM(hidden_size, hidden_size, num_layers=1, batch_first=True,
-                               dropout=0., bidirectional=False)
-        self.out = nn.Linear(hidden_size, output_size)
-        self.softmax = nn.LogSoftmax(dim=1)
+        self.gru = nn.GRU(hidden_size, hidden_size, n_layers, dropout=self.dropout, bidirectional=True)
 
-    def forward(self, input, hidden):
-        output = self.embedding(input)  # shape=[1, 1, 256]
-        output = F.relu(output)
-        output, hidden = self.rnn(output, hidden)
-        output = self.softmax(self.out(output[0]))
-        return output, hidden
+    def forward(self, input_seqs, input_lengths, hidden=None):
+        # Note: we run this all at once (over multiple batches of multiple sequences)
+        embedded = self.embedding(input_seqs)
+        packed = torch.nn.utils.rnn.pack_padded_sequence(embedded, input_lengths)
+        outputs, hidden = self.gru(packed, hidden)
+        outputs, output_lengths = torch.nn.utils.rnn.pad_packed_sequence(outputs)  # unpack (back to padded)
+        outputs = outputs[:, :, :self.hidden_size] + outputs[:, :, self.hidden_size:]  # Sum bidirectional outputs
+        return outputs, hidden
 
 
-class AttnDecoderRNN(nn.Module):
-    def __init__(self, hidden_size, output_size, max_length, dropout_p=0.1):
-        super(AttnDecoderRNN, self).__init__()
+class Attn(nn.Module):
+    def __init__(self, method, hidden_size):
+        super(Attn, self).__init__()
+
+        self.method = method
+        self.hidden_size = hidden_size
+
+        if self.method == 'general':
+            self.attn = nn.Linear(self.hidden_size, hidden_size)
+
+        elif self.method == 'concat':
+            self.attn = nn.Linear(self.hidden_size * 2, hidden_size)
+            self.v = nn.Parameter(torch.FloatTensor(1, hidden_size))
+
+    def forward(self, hidden, encoder_outputs):
+        max_len = encoder_outputs.size(0)
+        this_batch_size = encoder_outputs.size(1)
+
+        # Create variable to store attention energies
+        attn_energies = Variable(torch.zeros(this_batch_size, max_len))  # B x S
+
+        # For each batch of encoder outputs
+        for b in range(this_batch_size):
+            # Calculate energy for each encoder output
+            for i in range(max_len):
+                attn_energies[b, i] = self.score(hidden[:, b], encoder_outputs[i, b].unsqueeze(0))
+
+        # Normalize energies to weights in range 0 to 1, resize to 1 x B x S
+        return F.softmax(attn_energies).unsqueeze(1)
+
+    def score(self, hidden, encoder_output):
+
+        if self.method == 'dot':
+            hidden = hidden.squeeze(0)
+            encoder_output = encoder_output.squeeze(0)
+            energy = hidden.dot(encoder_output)
+            return energy
+
+        elif self.method == 'general':
+            hidden = hidden.squeeze(0)  # check
+            energy = self.attn(encoder_output).squeeze(0)
+            energy = hidden.dot(energy)
+            return energy
+
+        elif self.method == 'concat':
+            energy = self.attn(torch.cat((hidden, encoder_output), 1).squeeze(0))
+            v = self.v.squeeze(0)
+            energy = v.dot(energy)
+            return energy
+
+
+class LuongAttnDecoderRNN(nn.Module):
+    def __init__(self, attn_model, hidden_size, output_size, n_layers=1, dropout=0.1):
+        super(LuongAttnDecoderRNN, self).__init__()
+
+        # Keep for reference
+        self.attn_model = attn_model
         self.hidden_size = hidden_size
         self.output_size = output_size
-        self.dropout_p = dropout_p
-        self.max_length = max_length
+        self.n_layers = n_layers
+        self.dropout = dropout
 
-        self.embedding = nn.Embedding(self.output_size, self.hidden_size)
-        self.attn = nn.Linear(self.hidden_size * 2, self.max_length)
-        self.attn_combine = nn.Linear(self.hidden_size * 2, self.hidden_size)
-        self.dropout = nn.Dropout(self.dropout_p)
-        self.rnn = nn.LSTM(self.hidden_size, self.hidden_size)
-        self.out = nn.Linear(self.hidden_size, self.output_size)
+        # Define layers
+        self.embedding = nn.Embedding(output_size, hidden_size)
+        self.embedding_dropout = nn.Dropout(dropout)
+        self.gru = nn.GRU(hidden_size, hidden_size, n_layers, dropout=dropout)
+        self.concat = nn.Linear(hidden_size * 2, hidden_size)
+        self.out = nn.Linear(hidden_size, output_size)
 
-    def forward(self, input, hidden, encoder_outputs):
-        # encoder_outputs.shape = [30, 256]
-        embedded = self.embedding(input).squeeze(0)
-        embedded = self.dropout(embedded)  # shape = [1, 256]
-        embedded = embedded.unsqueeze(0)  # shape = [1, 1, 256]
+        # Choose attention model
+        if attn_model != 'none':
+            self.attn = Attn(attn_model, hidden_size)
 
-        emb_cat_hidden = torch.cat((embedded, hidden[0]), 2)  # shape = [1, 1, 512]
+    def forward(self, input_seq, last_hidden, encoder_outputs):
+        # Note: we run this one step at a time
 
-        attn_weights = F.softmax(
-            self.attn(emb_cat_hidden), dim=1)  # shape = [1, 1, 30]
+        # Get the embedding of the current input word (last output word)
+        batch_size = input_seq.size(0)
+        embedded = self.embedding(input_seq)
+        embedded = self.embedding_dropout(embedded)
+        embedded = embedded.view(1, batch_size, self.hidden_size)  # S=1 x B x N
 
-        encoder_outputs = encoder_outputs.unsqueeze(0)  # shape = [1, 30, 256]
+        # Get current hidden state from input word and last hidden state
+        rnn_output, hidden = self.gru(embedded, last_hidden)
 
-        attn_applied = torch.bmm(attn_weights,
-                                 encoder_outputs)  # shape = [1, 1, 256]
+        # Calculate attention from current RNN state and all encoder outputs;
+        # apply to encoder outputs to get weighted average
+        attn_weights = self.attn(rnn_output, encoder_outputs)
+        context = attn_weights.bmm(encoder_outputs.transpose(0, 1))  # B x S=1 x N
 
-        output = torch.cat((embedded, attn_applied), 2)  # shape = [1, 1, 512]
-        output = self.attn_combine(output)  # shape = [1, 1, 256]
+        # Attentional vector using the RNN hidden state and context vector
+        # concatenated together (Luong eq. 5)
+        rnn_output = rnn_output.squeeze(0)  # S=1 x B x N -> B x N
+        context = context.squeeze(1)  # B x S=1 x N -> B x N
+        concat_input = torch.cat((rnn_output, context), 1)
+        concat_output = F.tanh(self.concat(concat_input))
 
-        output = F.relu(output)
-        output, hidden = self.rnn(output, hidden)
+        # Finally predict next token (Luong eq. 6, without softmax)
+        output = self.out(concat_output)
 
-        output = F.log_softmax(self.out(output[0]), dim=1)
+        # Return final output, hidden state, and attention weights (for visualization)
         return output, hidden, attn_weights
-
-

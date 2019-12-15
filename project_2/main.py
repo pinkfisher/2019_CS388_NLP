@@ -1,8 +1,5 @@
 import argparse
-import random
-import numpy as np
 import time
-import torch
 import math
 from torch import optim
 from lf_evaluator import *
@@ -10,7 +7,7 @@ from models import *
 from data import *
 from utils import *
 from typing import List
-from torch.utils.data import Dataset
+from masked_cross_entropy import *
 
 def _parse_args():
     """
@@ -23,15 +20,15 @@ def _parse_args():
     # General system running and configuration options
     parser.add_argument('--do_nearest_neighbor', dest='do_nearest_neighbor', default=False, action='store_true', help='run the nearest neighbor model')
     parser.add_argument('--debug', dest='debug', default=False, action='store_true', help='set to debug mode ')
-    parser.add_argument('--num_train_sentence', dest='num_train_sentence', type=int, default=-1, help='set number of sentence to train on')
-    parser.add_argument('--attention', dest='attention', default=False, action='store_true', help='use attention')
-
+    parser.add_argument('--num_train_sentence', dest='num_train_sentence', type=int, default=-1,
+                        help='set number of sentence to train on')
     parser.add_argument('--train_path', type=str, default='data/geo_train.tsv', help='path to train data')
     parser.add_argument('--dev_path', type=str, default='data/geo_dev.tsv', help='path to dev data')
     parser.add_argument('--test_path', type=str, default='data/geo_test.tsv', help='path to blind test data')
     parser.add_argument('--test_output_path', type=str, default='geo_test_output.tsv', help='path to write blind test results')
     parser.add_argument('--domain', type=str, default='geo', help='domain (geo for geoquery)')
-    
+    parser.add_argument('--attn_model', type=str, default='general', help='Attention model to use: general (default), dot, concat')
+
     # Some common arguments for your convenience
     parser.add_argument('--seed', type=int, default=0, help='RNG seed (default = 0)')
     parser.add_argument('--epochs', type=int, default=100, help='num epochs to train for')
@@ -44,6 +41,20 @@ def _parse_args():
     # 50-200 might be a good range to start with for embedding and LSTM sizes
     args = parser.parse_args()
     return args
+
+
+def as_minutes(s):
+    m = math.floor(s / 60)
+    s -= m * 60
+    return '%dm %ds' % (m, s)
+
+
+def time_since(since, percent):
+    now = time.time()
+    s = now - since
+    es = s / (percent)
+    rs = es - s
+    return '%s (- %s)' % (as_minutes(s), as_minutes(rs))
 
 
 class NearestNeighborSemanticParser(object):
@@ -76,140 +87,36 @@ class NearestNeighborSemanticParser(object):
                     best_jaccard = jaccard
                     best_train_ex = train_ex
             # N.B. a list!
-            print(best_train_ex.y_tok)
             test_derivs.append([Derivation(test_ex, 1.0, best_train_ex.y_tok)])
         return test_derivs
 
 
 class Seq2SeqSemanticParser(object):
-    def __init__(self, encoder, decoder, output_indexer, encoder_embedding, attention=False):
+    def __init__(self, encoder, decoder, input_indexer, output_indexer, input_max_len, output_max_len, attention=False):
         self.encoder = encoder
         self.decoder = decoder
-        self.encoder_embedding = encoder_embedding
+        self.input_indexer = input_indexer
         self.output_indexer = output_indexer
         self.attention = attention
+        self.input_max_len = input_max_len
+        self.output_max_len = output_max_len
 
-    def decode(self, test_data: List[Example]) -> List[List[Derivation]]:
+    def decode(self, all_test_data: List[Example]) -> List[List[Derivation]]:
         test_derivs = []
+        for test_data in all_test_data:
+            test_data = [test_data]
 
-        test_data.sort(key=lambda ex: len(ex.x_indexed), reverse=True)
+            # Create indexed input
+            input_lengths = np.asarray([len(ex.x_indexed) for ex in test_data])
+            input_max_len = np.max(input_lengths)
+            input_batches = make_padded_input_tensor(test_data, input_indexer, input_max_len, reverse_input=False)
+            input_batches = torch.from_numpy(input_batches).transpose_(0, 1)
 
-        input_lens = np.asarray([len(ex.x_indexed) for ex in test_data])
-        input_max_len = np.max(input_lens)
-        all_test_input_data = make_padded_input_tensor(test_data, input_indexer, input_max_len,
-                                                        reverse_input=False)
+            decoded_words, _ = evaluate_batch(input_batches, input_lengths, self.output_max_len,
+                                              self.encoder, self.decoder, self.output_indexer)
+            test_derivs.append([Derivation(test_data, 1.0, decoded_words)])
 
-        # Make batched data
-        test_dataset = MatrixDataset(all_test_input_data, input_lens, all_test_input_data, input_lens,
-                                     get_index=True)
-        test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
-                                                   batch_size=1,
-                                                   shuffle=False)
-
-        for input_tensor, input_lens_tensor, target_tensor, target_lens_tensor, idx in test_loader:
-
-            input_tensor = self.encoder_embedding.forward(input_tensor)
-
-            if self.attention:
-                pred_words = decode_one_sentence_attended(input_tensor, input_lens_tensor, self.encoder, self.decoder,
-                                                 self.output_indexer)
-            else:
-                pred_words = decode_one_sentence(input_tensor, input_lens_tensor, self.encoder, self.decoder,
-                                                 self.output_indexer)
-
-            for i in range(len(pred_words)):
-                test_derivs.append([Derivation(test_data[idx[i]], 1.0, pred_words[i])])
         return test_derivs
-
-
-def decode_one_sentence(input_tensor, input_lens_tensor, encoder, decoder, output_indexer, max_length=65):
-    with torch.no_grad():
-        batch_size = input_tensor.shape[0]
-
-        SOS_token = output_indexer.index_of("<SOS>")
-        EOS_token = output_indexer.index_of("<EOS>")
-
-        (encoder_output, encoder_context_mask, encoder_hidden) = encoder.forward(input_tensor, input_lens_tensor)
-        encoder_hidden = (encoder_hidden[0].unsqueeze(0), encoder_hidden[1].unsqueeze(0))  # ((1, 1, 256), (1, 1, 256))
-
-        all_decoded_words = []
-        for sent_idx in range(batch_size):
-            decoder_input = torch.tensor([[SOS_token]])
-
-            decoder_hidden = (encoder_hidden[0][:, sent_idx, :].unsqueeze(0), encoder_hidden[1][:, sent_idx, :].unsqueeze(0))
-
-            decoded_words = []
-
-            for di in range(max_length):
-                decoder_output, decoder_hidden = decoder(
-                    decoder_input, decoder_hidden)
-                topv, topi = decoder_output.topk(1)
-                decoder_input = topi.squeeze().detach()
-
-                if decoder_input.item() == EOS_token:
-                    break
-                else:
-                    decoded_words.append(output_indexer.get_object(decoder_input.item()))
-                    decoder_input = decoder_input.unsqueeze(0).unsqueeze(0)
-            all_decoded_words.append(decoded_words)
-
-        return all_decoded_words
-
-
-def decode_one_sentence_attended(input_tensor, input_lens_tensor, encoder, decoder, output_indexer,
-                                 max_length=65, encoder_output_max_length=30):
-    with torch.no_grad():
-
-        batch_size = input_tensor.shape[0]
-
-        SOS_token = output_indexer.index_of("<SOS>")
-        EOS_token = output_indexer.index_of("<EOS>")
-
-        (encoder_output, encoder_context_mask, encoder_hidden) = encoder.forward(input_tensor, input_lens_tensor)
-        encoder_hidden = (encoder_hidden[0].unsqueeze(0), encoder_hidden[1].unsqueeze(0))  # ((1, 1, 256), (1, 1, 256))
-
-        all_decoded_words = []
-        for sent_idx in range(batch_size):
-            # pad encoder_output to fixed length
-            encoder_outputs = torch.zeros(encoder_output_max_length, encoder.hidden_size)
-            for ei in range(encoder_output.shape[0]):
-                encoder_outputs[ei, :] = encoder_output[ei, sent_idx, :]
-
-            decoder_input = torch.tensor([[SOS_token]])
-
-            decoder_hidden = (encoder_hidden[0][:, sent_idx, :].unsqueeze(0), encoder_hidden[1][:, sent_idx, :].unsqueeze(0))
-
-            decoded_words = []
-
-            for di in range(max_length):
-                decoder_output, decoder_hidden, decoder_attention = decoder(
-                    decoder_input, decoder_hidden, encoder_outputs)
-                topv, topi = decoder_output.topk(1)
-                decoder_input = topi.squeeze().detach()
-
-                if decoder_input.item() == EOS_token:
-                    break
-                else:
-                    decoded_words.append(output_indexer.get_object(decoder_input.item()))
-                    decoder_input = decoder_input.unsqueeze(0).unsqueeze(0)
-            all_decoded_words.append(decoded_words)
-        return all_decoded_words
-
-class MatrixDataset(Dataset):
-    def __init__(self, matrix, lens, target, target_lens, get_index=False):
-        self.matrix = matrix
-        self.lens = lens
-        self.target = target
-        self.target_lens = target_lens
-        self.get_index = get_index
-
-    def __len__(self):
-        return self.matrix.shape[0]
-
-    def __getitem__(self, idx):
-        if self.get_index:
-            return self.matrix[idx, :], self.lens[idx], self.target[idx, :], self.target_lens[idx], idx
-        return self.matrix[idx, :], self.lens[idx], self.target[idx, :], self.target_lens[idx]
 
 def make_padded_input_tensor(exs: List[Example], input_indexer: Indexer, max_len: int, reverse_input=False) -> np.ndarray:
     """
@@ -242,34 +149,27 @@ def make_padded_output_tensor(exs, output_indexer, max_len):
     return np.array([[ex.y_indexed[i] if i < len(ex.y_indexed) else output_indexer.index_of(PAD_SYMBOL) for i in range(0, max_len)] for ex in exs])
 
 
-def encode_input_for_decoder(x_tensor, inp_lens_tensor, model_input_emb: EmbeddingLayer, model_enc: RNNEncoder):
-    """
-    Runs the encoder (input embedding layer and encoder as two separate modules) on a tensor of inputs x_tensor with
-    inp_lens_tensor lengths.
-    YOU DO NOT NEED TO USE THIS FUNCTION. It's merely meant to illustrate the usage of EmbeddingLayer and RNNEncoder
-    as they're given to you, as well as show what kinds of inputs/outputs you need from your encoding phase.
-    :param x_tensor: [batch size, sent len] tensor of input token indices
-    :param inp_lens_tensor: [batch size] vector containing the length of each sentence in the batch
-    :param model_input_emb: EmbeddingLayer
-    :param model_enc: RNNEncoder
-    :return: the encoder outputs (per word), the encoder context mask (matrix of 1s and 0s reflecting which words
-    are real and which ones are pad tokens), and the encoder final states (h and c tuple)
-    E.g., calling this with x_tensor (0 is pad token):
-    [[12, 25, 0, 0],
-    [1, 2, 3, 0],
-    [2, 0, 0, 0]]
-    inp_lens = [2, 3, 1]
-    will return outputs with the following shape:
-    enc_output_each_word = 3 x 4 x dim, enc_context_mask = [[1, 1, 0, 0], [1, 1, 1, 0], [1, 0, 0, 0]],
-    enc_final_states = 3 x dim
-    """
-    input_emb = model_input_emb.forward(x_tensor)
-    (enc_output_each_word, enc_context_mask, enc_final_states) = model_enc.forward(input_emb, inp_lens_tensor)
-    enc_final_states_reshaped = (enc_final_states[0].unsqueeze(0), enc_final_states[1].unsqueeze(0))
-    return (enc_output_each_word, enc_context_mask, enc_final_states_reshaped)
+def random_batch(all_train_data: List[Example], batch_size: int, input_max_len, output_max_len, input_indexer, output_indexer):
+    train_data = list(np.random.choice(all_train_data, batch_size, replace=False))
+
+    # Sort in descending order by x_indexed, essential for pack_padded_sequence
+    train_data.sort(key=lambda ex: len(ex.x_indexed), reverse=True)
+
+    # Create indexed input
+    input_lengths = np.asarray([len(ex.x_indexed) for ex in train_data])
+
+    all_train_input_data = make_padded_input_tensor(train_data, input_indexer, input_max_len, reverse_input=False)
+    all_train_input_data = torch.from_numpy(all_train_input_data).transpose_(0, 1)
+
+    target_lengths = np.asarray([len(ex.y_indexed) for ex in train_data])
+
+    all_train_output_data = make_padded_output_tensor(train_data, output_indexer, output_max_len)
+    all_train_output_data = torch.from_numpy(all_train_output_data).transpose_(0, 1)
+
+    return all_train_input_data, input_lengths, all_train_output_data, target_lengths
 
 
-def train_model_encdec(train_data: List[Example], test_data: List[Example], input_indexer, output_indexer, args) -> Seq2SeqSemanticParser:
+def train_model_encdec(all_train_data: List[Example], test_data: List[Example], input_indexer, output_indexer, args) -> Seq2SeqSemanticParser:
     """
     Function to train the encoder-decoder model on the given data.
     :param train_data:
@@ -279,218 +179,169 @@ def train_model_encdec(train_data: List[Example], test_data: List[Example], inpu
     :param args:
     :return:
     """
-    # Sort in descending order by x_indexed, essential for pack_padded_sequence
-    train_data.sort(key=lambda ex: len(ex.x_indexed), reverse=True)
-    test_data.sort(key=lambda ex: len(ex.x_indexed), reverse=True)
-
-    # Create indexed input
-    input_lens = np.asarray([len(ex.x_indexed) for ex in train_data])
-    input_max_len = np.max(input_lens)
-    all_train_input_data = make_padded_input_tensor(train_data, input_indexer, input_max_len, reverse_input=False)
-    all_test_input_data = make_padded_input_tensor(test_data, input_indexer, input_max_len, reverse_input=False)
-
-    output_lens = np.asarray([len(ex.y_indexed) for ex in train_data])
-    output_max_len = np.max(output_lens)
-    all_train_output_data = make_padded_output_tensor(train_data, output_indexer, output_max_len)
-    all_test_output_data = make_padded_output_tensor(test_data, output_indexer, output_max_len)
-
+    print("==========START DATA PROCESSING=========")
+    input_max_len = np.max(np.asarray([len(ex.x_indexed) for ex in all_train_data]))
+    output_max_len = np.max(np.asarray([len(ex.y_indexed) for ex in all_train_data]))
     print("Train length: %i" % input_max_len)
-    print("Train output length: %i" % np.max(np.asarray([len(ex.y_indexed) for ex in train_data])))
-    print("Train matrix: %s; shape = %s" % (all_train_input_data, all_train_input_data.shape))
-    print("="*20)
+    print("Train output length: %i" % output_max_len)
 
-    # Make batched data
-    train_dataset = MatrixDataset(all_train_input_data, input_lens, all_train_output_data, output_lens)
-    train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
-                                               batch_size=args.batch_size,
-                                               shuffle=False)
-
-    # First create a model. Then loop over epochs, loop over examples, and given some indexed words, call
-    # the encoder, call your decoder, accumulate losses, update parameters
-    start = time.time()
-    print_loss_total = 0  # Reset every print_every
-    plot_loss_total = 0  # Reset every plot_every
-
-    enc_input_size = 100  # check
-    enc_dict_size = len(input_indexer)
-    enc_hidden_size = dec_hidden_size = 256
-    dec_input_size = dec_output_size = len(output_indexer)
     if args.debug:
-        dec_input_size = dec_output_size = len(input_indexer)
-    n_epochs = args.epochs
-    n_sentences = all_train_input_data.shape[0]
+        output_indexer = input_indexer
 
-    encoder_embedding = EmbeddingLayer(enc_input_size, enc_dict_size, 0)
-    encoder = RNNEncoder(enc_input_size, enc_hidden_size, bidirect=False)
-    if args.attention:
-        decoder = AttnDecoderRNN(dec_hidden_size, dec_output_size, max_length=30)
-    else:
-        decoder = RNNDecoder(dec_input_size, dec_hidden_size, dec_output_size)
+    # Configuration
+    attn_model = args.attn_model
+    hidden_size = 100
+    n_layers = 2
+    dropout = 0.1
+    teacher_forcing_ratio = 0.5
+    learning_rate = 0.0001
+    decoder_learning_ratio = 5.0
 
-    #encoder_optimizer = optim.SGD(encoder.parameters(), lr=0.1)
-    encoder_optimizer = optim.Adam(encoder.parameters(), lr=0.01)
-    #decoder_optimizer = optim.SGD(decoder.parameters(), lr=0.1)
-    decoder_optimizer = optim.Adam(decoder.parameters(), lr=0.01)
-    criterion = nn.NLLLoss()
+    # Initialize models
+    encoder = EncoderRNN(len(input_indexer), hidden_size, n_layers, dropout=dropout)
+    decoder = LuongAttnDecoderRNN(attn_model, hidden_size, len(output_indexer), n_layers, dropout=dropout)
 
-    for epoch in range(1, n_epochs+1):
+    # Initialize optimizers and criterion
+    encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate)
+    decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate * decoder_learning_ratio)
+    criterion = nn.CrossEntropyLoss()
 
-        #ex_indices = [i for i in range(n_sentences)]
-        #random.shuffle(ex_indices)
+    print("==========START TRAINING=========")
+    start = time.time()
+    print_loss_total = 0
+    for epoch in range(1, args.epochs+1):
+        for iter in range(int(len(all_train_data)/args.batch_size)):
 
-        #for i in ex_indices:
-        for input_tensor, input_lens_tensor, target_tensor, target_lens_tensor in train_loader:
+            input_batches, input_lengths, target_batches, target_lengths = random_batch(all_train_data, args.batch_size,
+                                                            input_max_len, output_max_len, input_indexer, output_indexer)
 
             if args.debug:
-                target_tensor = input_tensor
-                target_lens_tensor = input_lens_tensor
+                target_batches = input_batches
+                target_lengths = input_lengths
 
-            input_tensor = encoder_embedding.forward(input_tensor)
-
-            if args.attention:
-                loss = train_attended_model(input_tensor, input_lens_tensor, target_tensor, target_lens_tensor, encoder, decoder, encoder_optimizer,
-                                   decoder_optimizer, criterion, output_indexer)
-            else:
-                loss = train_model(input_tensor, input_lens_tensor, target_tensor,target_lens_tensor, encoder, decoder, encoder_optimizer, decoder_optimizer,
-                               criterion, output_indexer)
+            # Run the train function
+            loss, ec, dc = train_batch(
+                input_batches, input_lengths, target_batches, target_lengths,
+                encoder, decoder, encoder_optimizer, decoder_optimizer, output_max_len,
+                criterion, args
+            )
             print_loss_total += loss
-            plot_loss_total += loss
-
-        print_loss_avg = print_loss_total
-        print('%s (%d %d%%) %.4f' % (timeSince(start, epoch / n_epochs),
-                                     epoch, epoch / n_epochs * 100, print_loss_avg))
-
+        print('%s (%d %d%%) %.4f' % (time_since(start, epoch / args.epochs),
+                                     epoch, epoch / args.epochs * 100, print_loss_total))
         print_loss_total = 0
 
-    if args.debug:
-        return Seq2SeqSemanticParser(encoder, decoder, input_indexer, encoder_embedding, attention=args.attention)
-    return Seq2SeqSemanticParser(encoder, decoder, output_indexer, encoder_embedding, attention=args.attention)
+    return Seq2SeqSemanticParser(encoder, decoder, input_indexer, output_indexer, input_max_len, output_max_len)
 
 
-def train_model(input_tensor, input_lens_tensor, target_tensors, target_lens_tensor, encoder, decoder, encoder_optimizer, decoder_optimizer,
-          criterion, output_indexer, teacher_forcing_ratio=0.5):
-    batch_size = input_tensor.shape[0]
-    encoder_optimizer.zero_grad()
-    decoder_optimizer.zero_grad()
+def train_batch(input_batches, input_lengths, target_batches, target_lengths, encoder, decoder, encoder_optimizer,
+          decoder_optimizer, output_max_len, criterion, args, teacher_forcing_ratio=0.5):
 
     SOS_token = output_indexer.index_of("<SOS>")
     EOS_token = output_indexer.index_of("<EOS>")
 
-    loss = 0
+    # Zero gradients of both optimizers
+    encoder_optimizer.zero_grad()
+    decoder_optimizer.zero_grad()
+    loss = 0  # Added onto for each word
 
-    (encoder_output, encoder_context_mask, encoder_hidden) = encoder.forward(input_tensor, input_lens_tensor)
-    encoder_hidden = (encoder_hidden[0].unsqueeze(0), encoder_hidden[1].unsqueeze(0))  #((1, 1, 256), (1, 1, 256))
+    # Run words through encoder
+    encoder_outputs, encoder_hidden = encoder(input_batches, input_lengths, None)
 
-    for sent_idx in range(batch_size):
-        decoder_input = torch.tensor([[SOS_token]])
+    # Prepare input and output variables
+    decoder_input = Variable(torch.LongTensor([SOS_token] * args.batch_size))
+    decoder_hidden = encoder_hidden[:decoder.n_layers]  # Use last (forward) hidden state from encoder
 
-        decoder_hidden = (encoder_hidden[0][:, sent_idx, :].unsqueeze(0), encoder_hidden[1][:, sent_idx, :].unsqueeze(0))
+    max_target_length = max(target_lengths)
+    all_decoder_outputs = Variable(torch.zeros(output_max_len, args.batch_size, decoder.output_size))
 
-        use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
+    use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
 
-        target_length = target_lens_tensor[sent_idx]
-        target_tensor = target_tensors[sent_idx, :].unsqueeze(0)
+    if use_teacher_forcing:
+        # Run through decoder one time step at a time
+        for t in range(max_target_length):
+            decoder_output, decoder_hidden, decoder_attn = decoder(
+                decoder_input, decoder_hidden, encoder_outputs
+            )
 
-        if use_teacher_forcing:
-            # Teacher forcing: Feed the target as the next input
-            for di in range(target_length):
-                decoder_output, decoder_hidden = decoder(
-                    decoder_input, decoder_hidden)  # output shape = [1, voc_size]
-                loss += criterion(decoder_output, target_tensor[:, di])
-                decoder_input = target_tensor[:, di].unsqueeze(0)  # Teacher forcing
+            all_decoder_outputs[t] = decoder_output
+            decoder_input = target_batches[t]  # Next input is current target
 
-        else:
-            # Without teacher forcing: use its own predictions as the next input
-            for di in range(target_length):
-                decoder_output, decoder_hidden = decoder(
-                    decoder_input, decoder_hidden)
-                topv, topi = decoder_output.topk(1)
-                decoder_input = topi.squeeze().detach()  # detach from history as input
+    else:
+        # Run through decoder
+        n_EOS_tokens = 0
+        for di in range(max_target_length):
+            decoder_output, decoder_hidden, decoder_attn = decoder(
+                decoder_input, decoder_hidden, encoder_outputs
+            )  # decoder_output.shape = [batch_size, output_vocab_size]
 
-                loss += criterion(decoder_output, target_tensor[:, di])
-                if decoder_input.item() == EOS_token:
+            # Choose top word from output
+            topv, topi = decoder_output.data.topk(1)
+            if EOS_token in topi:
+                n_EOS_tokens += 1
+                if n_EOS_tokens == args.batch_size:
                     break
-                else:
-                    decoder_input = decoder_input.unsqueeze(0).unsqueeze(0)
+            all_decoder_outputs[di] = decoder_output
+            decoder_input = Variable(torch.LongTensor(topi.squeeze(1)))
 
+    # Loss calculation and backpropagation
+    loss = masked_cross_entropy(
+        all_decoder_outputs.transpose(0, 1).contiguous(),  # -> batch x seq
+        target_batches.transpose(0, 1).contiguous(),  # -> batch x seq
+        target_lengths
+    )
     loss.backward()
 
+    # Clip gradient norms
+    ec = torch.nn.utils.clip_grad_norm(encoder.parameters(), 50.0)
+    dc = torch.nn.utils.clip_grad_norm(decoder.parameters(), 50.0)
+
+    # Update parameters with optimizers
     encoder_optimizer.step()
     decoder_optimizer.step()
 
-    return loss.item() / target_length
+    return loss.data, ec, dc
 
 
-def train_attended_model(input_tensor, input_lens_tensor, target_tensors, target_lens_tensor, encoder, decoder, encoder_optimizer, decoder_optimizer,
-          criterion, output_indexer, encoder_output_max_length=30, teacher_forcing_ratio=0.3):
-
-    batch_size = input_tensor.shape[0]
-    encoder_optimizer.zero_grad()
-    decoder_optimizer.zero_grad()
+def evaluate_batch(input_batches, input_lengths, max_length, encoder, decoder, output_indexer):
 
     SOS_token = output_indexer.index_of("<SOS>")
     EOS_token = output_indexer.index_of("<EOS>")
 
-    loss = 0
+    with torch.no_grad():
 
-    (encoder_output, encoder_context_mask, encoder_hidden) = encoder.forward(input_tensor, input_lens_tensor)
-    encoder_hidden = (encoder_hidden[0].unsqueeze(0), encoder_hidden[1].unsqueeze(0))  #((1, 1, 256), (1, 1, 256))
-    #  encoder_output.shape = [input_size, batch_size, hidden_size]= [20, 2, 256]
+        # Run through encoder
+        #print(input_batches.shape)
+        #print(input_lengths)
+        encoder_outputs, encoder_hidden = encoder(input_batches, input_lengths, None)
 
-    for sent_idx in range(batch_size):
-        encoder_outputs = torch.zeros(encoder_output_max_length, encoder.hidden_size)
-        for ei in range(encoder_output.shape[0]):
-            encoder_outputs[ei, :] = encoder_output[ei, sent_idx, :]
+        # Create starting vectors for decoder
+        decoder_input = Variable(torch.LongTensor([SOS_token]))  # SOS
+        decoder_hidden = encoder_hidden[:decoder.n_layers]  # Use last (forward) hidden state from encoder
 
-        decoder_input = torch.tensor([[SOS_token]])
+        # Store output words and attention states
+        decoded_words = []
+        decoder_attentions = torch.zeros(max_length + 1, max_length + 1)
 
-        decoder_hidden = (encoder_hidden[0][:, sent_idx, :].unsqueeze(0), encoder_hidden[1][:, sent_idx, :].unsqueeze(0))
+        # Run through decoder
+        for di in range(max_length):
+            decoder_output, decoder_hidden, decoder_attention = decoder(
+                decoder_input, decoder_hidden, encoder_outputs
+            )
+            decoder_attentions[di, :decoder_attention.size(2)] += decoder_attention.squeeze(0).squeeze(0).data
 
-        use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
+            # Choose top word from output
+            topv, topi = decoder_output.data.topk(1)
+            ni = topi[0][0]
+            if ni == EOS_token:
+                #decoded_words.append('<EOS>')
+                break
+            else:
+                decoded_words.append(output_indexer.get_object(ni.item()))
 
-        target_length = target_lens_tensor[sent_idx]
-        target_tensor = target_tensors[sent_idx, :].unsqueeze(0)
-        if use_teacher_forcing:
-            # Teacher forcing: Feed the target as the next input
-            for di in range(target_length):
-                decoder_output, decoder_hidden, decoder_attention = decoder(
-                    decoder_input, decoder_hidden, encoder_outputs)  # decoder_output.shape = [1, voc_size]
-                loss += criterion(decoder_output, target_tensor[:, di])
-                decoder_input = target_tensor[:, di].unsqueeze(0)  # Teacher forcing
+            # Next input is chosen word
+            decoder_input = Variable(torch.LongTensor([ni]))
 
-        else:
-            # Without teacher forcing: use its own predictions as the next input
-            for di in range(target_length):
-                decoder_output, decoder_hidden, decoder_attention = decoder(
-                    decoder_input, decoder_hidden, encoder_outputs)
-                topv, topi = decoder_output.topk(1)
-                decoder_input = topi.squeeze().detach()  # detach from history as input
-
-                loss += criterion(decoder_output, target_tensor[:, di])
-                if decoder_input.item() == EOS_token:
-                    break
-                else:
-                    decoder_input = decoder_input.unsqueeze(0).unsqueeze(0)
-
-    loss.backward()
-
-    encoder_optimizer.step()
-    decoder_optimizer.step()
-
-    return loss.item() / target_length
-
-
-def asMinutes(s):
-    m = math.floor(s / 60)
-    s -= m * 60
-    return '%dm %ds' % (m, s)
-
-def timeSince(since, percent):
-    now = time.time()
-    s = now - since
-    es = s / (percent)
-    rs = es - s
-    return '%s (- %s)' % (asMinutes(s), asMinutes(rs))
+    return decoded_words, decoder_attentions[:di + 1, :len(encoder_outputs)]
 
 
 def evaluate(test_data: List[Example], decoder, example_freq=50, print_output=True, outfile=None):
@@ -531,9 +382,6 @@ if __name__ == '__main__':
     # Load the training and test data
 
     train, dev, test = load_datasets(args.train_path, args.dev_path, args.test_path, domain=args.domain)
-
-    if 0 < args.num_train_sentence < len(train):
-        train = train[:args.num_train_sentence]
     train_data_indexed, dev_data_indexed, test_data_indexed, input_indexer, output_indexer = index_datasets(train, dev, test, args.decoder_len_limit)
     print("%i train exs, %i dev exs, %i input types, %i output types" % (len(train_data_indexed), len(dev_data_indexed), len(input_indexer), len(output_indexer)))
     print("Input indexer: %s" % input_indexer)

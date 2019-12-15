@@ -7,7 +7,7 @@ server.numThreads	4
 data.random	1
 data.trainPaths	
 data.maxSentenceLength	2147483647
-data.generalPaths	evaluator/domains/dbquery/geoquery/1/geoquery.dlog evaluator/domains/dbquery/geoquery/1/lexicon.dlog /var/folders/19/rw908y710gz8njcg2p8cl5s80000gn/T/tmpcyf7gdy2.dlog
+data.generalPaths	evaluator/domains/dbquery/geoquery/1/geoquery.dlog evaluator/domains/dbquery/geoquery/1/lexicon.dlog /var/folders/19/rw908y710gz8njcg2p8cl5s80000gn/T/tmpc9dm8ow0.dlog
 data.testPaths	
 data.generalMaxExamples	MAX
 data.trainMaxExamples	2147483647
@@ -22,7 +22,7 @@ parser.cachedPath
 parser.lowercase	true
 log.maxIndLevel	10
 log.msPerLine	0
-log.file	/Users/niyixuan/PycharmProjects/CS388_NLP/project_2/state/execs/6.exec/log
+log.file	/Users/niyixuan/PycharmProjects/CS388_NLP/project_2_1/state/execs/6.exec/log
 log.stdout	true
 log.note	
 log.forcePrint	false
@@ -48,8 +48,12 @@ main.startServer	false
 main.interactive	false
 model.timeout	0
 model.dlogOptions	lexMode=0
-model.posTagDictPath	
-model.lexToTime	false
+model.features	pred pred2 predarg lexpred lexnull
+model.pruneEmptyDen	false
+model.useSyntax	true
+model.pruneErrDen	false
+model.pruneInfDen	false
+model.beamSize	100
 model.forceRightBranching	false
 model.forceParseSyntax	false
 model.autoUpdate	false
@@ -72,17 +76,13 @@ model.normPhrasePrefixLen	2147483647
 model.inParamsPath	
 model.outParamsPath	
 model.outBasketsPath	
-model.features	pred pred2 predarg lexpred lexnull
-model.pruneEmptyDen	false
-model.useSyntax	true
-model.pruneErrDen	false
-model.pruneInfDen	false
-model.beamSize	100
+model.posTagDictPath	
+model.lexToTime	false
 model.verbose	2
 exec.create	true
 exec.monitor	true
 exec.execDir	
-exec.execPoolDir	/Users/niyixuan/PycharmProjects/CS388_NLP/project_2/state/execs
+exec.execPoolDir	/Users/niyixuan/PycharmProjects/CS388_NLP/project_2_1/state/execs
 exec.actualExecPoolDir	
 exec.overwriteExecDir	false
 exec.useStandardExecPoolDirStrategy	true

@@ -1,6 +1,6 @@
 log.note	
-exec.memory	195M
-exec.time	2.7s
+exec.memory	174M
+exec.time	2.6s
 exec.errors	0
 exec.warnings	0
 numTrainExamples	84

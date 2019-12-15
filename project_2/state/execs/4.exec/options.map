@@ -5,9 +5,9 @@ server.logPath
 server.collapseDetails	false
 server.numThreads	4
 data.random	1
-data.maxSentenceLength	2147483647
-data.generalPaths	evaluator/domains/dbquery/geoquery/1/geoquery.dlog evaluator/domains/dbquery/geoquery/1/lexicon.dlog /var/folders/19/rw908y710gz8njcg2p8cl5s80000gn/T/tmpqvcpzyiq.dlog
 data.trainPaths	
+data.maxSentenceLength	2147483647
+data.generalPaths	evaluator/domains/dbquery/geoquery/1/geoquery.dlog evaluator/domains/dbquery/geoquery/1/lexicon.dlog /var/folders/19/rw908y710gz8njcg2p8cl5s80000gn/T/tmpycmdflk8.dlog
 data.testPaths	
 data.generalMaxExamples	MAX
 data.trainMaxExamples	2147483647
@@ -22,15 +22,15 @@ parser.cachedPath
 parser.lowercase	true
 log.maxIndLevel	10
 log.msPerLine	0
-log.file	/Users/niyixuan/PycharmProjects/CS388_NLP/project_2/state/execs/4.exec/log
+log.file	/Users/niyixuan/PycharmProjects/CS388_NLP/project_2_1/state/execs/4.exec/log
 log.stdout	true
 log.note	
 log.forcePrint	false
 log.maxPrintErrors	10000
 learn.random	1
 learn.permuteExamples	false
-learn.initStepSize	1.0
 learn.numIters	5
+learn.initStepSize	1.0
 learn.stepSizeReductionPower	0.0
 learn.useAdaptiveGrad	false
 learn.miniBatchSize	MAX
@@ -47,14 +47,17 @@ main.launchParser	false
 main.startServer	false
 main.interactive	false
 model.timeout	0
+model.posTagDictPath	
+model.lexToTime	false
+model.dlogOptions	lexMode=0
 model.features	pred pred2 predarg lexpred lexnull
-model.useSyntax	true
 model.pruneEmptyDen	false
+model.useSyntax	true
 model.pruneErrDen	false
 model.pruneInfDen	false
+model.beamSize	100
 model.forceRightBranching	false
 model.forceParseSyntax	false
-model.beamSize	100
 model.autoUpdate	false
 model.useBayesianAveraging	true
 model.allowDelayedExtraction	false
@@ -75,14 +78,11 @@ model.normPhrasePrefixLen	2147483647
 model.inParamsPath	
 model.outParamsPath	
 model.outBasketsPath	
-model.posTagDictPath	
-model.lexToTime	false
-model.dlogOptions	lexMode=0
 model.verbose	2
 exec.create	true
 exec.monitor	true
 exec.execDir	
-exec.execPoolDir	/Users/niyixuan/PycharmProjects/CS388_NLP/project_2/state/execs
+exec.execPoolDir	/Users/niyixuan/PycharmProjects/CS388_NLP/project_2_1/state/execs
 exec.actualExecPoolDir	
 exec.overwriteExecDir	false
 exec.useStandardExecPoolDirStrategy	true
@@ -104,11 +104,11 @@ exec.dontCatchExceptions	false
 int.random	1
 int.displayMaxSetSize	1
 int.displayTypes	false
-int.maxCost	100000
 int.displayDens	false
 int.displaySpans	false
 int.prettyMaxSetSize	10
 int.crashOnTypeError	false
+int.maxCost	100000
 int.roundNumDigits	2147483647
 int.verbose	0
 learn.backtrack.stepSizeDecrFactor	0.9
